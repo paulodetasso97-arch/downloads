@@ -289,13 +289,13 @@ def pagina_baixar_videos():
             reel_url = st.text_input("URL do Reel:")
             submitted = st.form_submit_button("Baixar Reel Agora")
         if submitted and reel_url:
-            download_dir = DOWNLOAD_DIRS["Instagram"]
             with st.spinner("Baixando o Reel... Por favor, aguarde."):
                 try:
                     if "/reel/" not in reel_url:
                         st.error("Por favor, insira uma URL válida de um Reel do Instagram.")
                         st.stop()
                     post_code = reel_url.split("/reel/")[1].split("/")[0]
+                    download_dir = DOWNLOAD_DIRS["Instagram"]
                     os.makedirs(download_dir, exist_ok=True)
                     L = instaloader.Instaloader()
                     post = instaloader.Post.from_shortcode(L.context, post_code)
@@ -315,7 +315,10 @@ def pagina_baixar_videos():
         if submitted and tw_url:
             job = {
                 "url": tw_url, "title": tw_url,
-                "ydl_opts": {'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s'},
+                "ydl_opts": {
+                    'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s',
+                    'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                },
                 "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]
             }
             st.session_state.download_queue.append(job)
@@ -329,6 +332,7 @@ def adicionar_filme_a_fila(video_url, video_title):
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
         'ffmpeg_location': FFMPEG_LOCATION,
+        'http_headers': {'User-Agent': 'Mozilla/5.0'},
     }
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Filme", "download_dir": DOWNLOAD_DIRS["Filme"]}
@@ -349,12 +353,12 @@ def pagina_filmes():
             with st.spinner(f"Pesquisando por '{full_search_query}'..."):
                 try:
                     # Limita a busca aos 5 primeiros resultados com 'ytsearch5:'
-                    ydl_opts = {'quiet': True, 'default_search': 'ytsearch5', 'extract_flat': 'in_playlist'}
-
-                    # Usa cookies do navegador se configurado, para evitar erros de autenticação do YouTube
-                    browser = st.session_state.config.get("browser_cookies", "Nenhum")
-                    if browser != "Nenhum":
-                        ydl_opts['cookiesfrombrowser'] = (browser.lower(),)
+                    ydl_opts = {
+                        'quiet': True,
+                        'default_search': 'ytsearch5',
+                        'extract_flat': 'in_playlist',
+                        'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                    }
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(full_search_query, download=False)
@@ -381,8 +385,15 @@ def pagina_filmes():
                 duration = entry.get('duration_string', 'N/A')
                 st.caption(f"Duração: {duration}")
             with col3:
-                if st.button("Adicionar à Fila", key=f"add_film_{i}"):
-                    adicionar_filme_a_fila(entry.get('url'), entry.get('title'))
+                if st.button("Baixar Filme", key=f"add_film_{i}"):
+                    st.session_state.current_download_title = entry.get('title')
+                    ydl_opts = {
+                        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                        'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
+                        'ffmpeg_location': FFMPEG_LOCATION,
+                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                    }
+                    gerenciador_de_download(ydl_opts, entry.get('url'), "Filme", DOWNLOAD_DIRS["Filme"], display_mode='full')
                     
 def pagina_fila_de_downloads():
     st.title("⏳ Fila de Downloads")
@@ -459,6 +470,7 @@ def adicionar_musica_a_fila(video_url, video_title):
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
+        'http_headers': {'User-Agent': 'Mozilla/5.0'},
     }
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Música", "download_dir": DOWNLOAD_DIRS["Música"]}
@@ -487,6 +499,7 @@ def pagina_musicas():
                             'preferredcodec': 'mp3',
                             'preferredquality': '192',
                         }],
+        'http_headers': {'User-Agent': 'Mozilla/5.0'},
                     }
                     # Chama o gerenciador de download diretamente
                     gerenciador_de_download(ydl_opts, music_url, "Música", download_dir, display_mode='full')
@@ -503,12 +516,12 @@ def pagina_musicas():
         if search_query:
             with st.spinner(f"Pesquisando por '{search_query}'..."):
                 try:
-                    ydl_opts = {'quiet': True, 'default_search': 'ytsearch5', 'extract_flat': 'in_playlist'}
-
-                    # Usa cookies do navegador se configurado, para evitar erros de autenticação do YouTube
-                    browser = st.session_state.config.get("browser_cookies", "Nenhum")
-                    if browser != "Nenhum":
-                        ydl_opts['cookiesfrombrowser'] = (browser.lower(),)
+                    ydl_opts = {
+                        'quiet': True,
+                        'default_search': 'ytsearch5',
+                        'extract_flat': 'in_playlist',
+                        'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                    }
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(search_query, download=False)
@@ -535,8 +548,16 @@ def pagina_musicas():
                 duration = entry.get('duration_string', 'N/A')
                 st.caption(f"Duração: {duration}")
             with col3:
-                if st.button("Adicionar à Fila", key=f"add_music_{i}"):
-                    adicionar_musica_a_fila(entry.get('url'), entry.get('title'))
+                if st.button("Baixar Música", key=f"add_music_{i}"):
+                    st.session_state.current_download_title = entry.get('title')
+                    ydl_opts = {
+                        'ffmpeg_location': FFMPEG_LOCATION,
+                        'format': 'bestaudio/best',
+                        'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
+                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                    }
+                    gerenciador_de_download(ydl_opts, entry.get('url'), "Música", DOWNLOAD_DIRS["Música"], display_mode='full')
 
 def pagina_historico():
     st.title("📜 Histórico de downloads")
@@ -620,10 +641,8 @@ def pagina_configuracoes():
     st.subheader("Downloads e Pesquisa")
     browser_cookies = st.selectbox(
         "Usar cookies do navegador para pesquisa (resolve erros 'Sign in to confirm you’re not a bot')",
-        ["Nenhum", "Chrome", "Firefox", "Edge", "Brave", "Vivaldi", "Opera"],
-        index=["Nenhum", "Chrome", "Firefox", "Edge", "Brave", "Vivaldi", "Opera"].index(current_config.get("browser_cookies", "Nenhum"))
+        ["Nenhum"] # Removido pois não funciona em produção
     )
-    st.info("Para que isso funcione, você precisa estar logado na sua conta do YouTube no navegador escolhido.")
 
     st.markdown("---")
     # Botão para exportar as configurações atuais
