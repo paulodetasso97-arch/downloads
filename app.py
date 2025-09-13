@@ -139,8 +139,8 @@ elif pagina == "Baixar músicas" and os.path.exists("ww.jpg"):
     set_background("ww.jpg", st.session_state.config)
 elif pagina == "Fila de Downloads" and os.path.exists("ww.jpg"):
     set_background("ww.jpg", st.session_state.config)
-elif os.path.exists("ww.jpg"):  # Papel de parede padrão para as outras páginas
-    set_background("ww.jpg", st.session_state.config)
+elif os.path.exists("wallpaper1.jpg"):  # Papel de parede padrão para as outras páginas
+    set_background("wallpaper1.jpg", st.session_state.config)
 
 
 # Função para salvar histórico
@@ -362,7 +362,7 @@ def pagina_filmes():
                 st.caption(f"Duração: {duration}")
             with col3:
                 if st.button("Adicionar à Fila", key=f"add_film_{i}"):
-                    adicionar_filme_a_fila(entry['webpage_url'], entry.get('title'))
+                    adicionar_filme_a_fila(entry.get('url'), entry.get('title'))
                     
 def pagina_fila_de_downloads():
     st.title("⏳ Fila de Downloads")
@@ -514,7 +514,7 @@ def pagina_musicas():
                 st.caption(f"Duração: {duration}")
             with col3:
                 if st.button("Adicionar à Fila", key=f"add_music_{i}"):
-                    adicionar_musica_a_fila(entry['webpage_url'], entry.get('title'))
+                    adicionar_musica_a_fila(entry.get('url'), entry.get('title'))
 
 def pagina_historico():
     st.title("📜 Histórico de downloads")
@@ -695,4 +695,3 @@ if st.session_state.is_queue_running and st.session_state.download_queue and pag
     gerenciador_de_download(job['ydl_opts'], job['url'], job['tipo'], job['download_dir'], display_mode='toast')
     if st.session_state.current_download_title is None: # Se o download terminou
         st.session_state.download_queue.pop(0)
-
