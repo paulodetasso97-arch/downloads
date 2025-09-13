@@ -41,9 +41,9 @@ def set_background(png_file, config):
         background-attachment: fixed;
         font-family: 'Orbitron', sans-serif; /* Aplica a fonte estilo calculadora */
     }}
-    /* Regra geral para deixar todo o texto branco com sombra */
+    /* Regra geral para deixar todo o texto preto */
     body, .st-emotion-cache-16idsys p, .st-emotion-cache-16txtl3, .st-emotion-cache-1y4p8pa, .st-emotion-cache-10trblm, .st-emotion-cache-q8sbsg p, .st-emotion-cache-1kyxreq, .st-emotion-cache-aabcns p, .st-emotion-cache-ocqkz7, .st-emotion-cache-1xarl3l, .st-emotion-cache-1xarl3l p {{
-        color: white !important;
+        color: black !important;
     }}
     .css-18e3th9 {{ background-color: {accent_color}; }} /* Sidebar */
     .stButton>button {{ background-color: #1E90FF; color: white; }} /* Botões: Azul (DodgerBlue) */
