@@ -276,7 +276,10 @@ def pagina_baixar_videos():
         if submitted and yt_url:
             job = {
                 "url": yt_url, "title": yt_url,
-                "ydl_opts": {'outtmpl': 'youtube_baixados/%(title)s.%(ext)s'},
+                "ydl_opts": {
+                    'outtmpl': 'youtube_baixados/%(title)s.%(ext)s',
+                    'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                },
                 "tipo": "Youtube", "download_dir": "youtube_baixados"
             }
             st.session_state.download_queue.append(job)
