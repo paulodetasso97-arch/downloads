@@ -139,8 +139,8 @@ elif pagina == "Baixar músicas" and os.path.exists("ww.jpg"):
     set_background("ww.jpg", st.session_state.config)
 elif pagina == "Fila de Downloads" and os.path.exists("ww.jpg"):
     set_background("ww.jpg", st.session_state.config)
-elif os.path.exists("wallpaper1.jpg"):  # Papel de parede padrão para as outras páginas
-    set_background("wallpaper1.jpg", st.session_state.config)
+elif os.path.exists("ww.jpg"):  # Papel de parede padrão para as outras páginas
+    set_background("ww.jpg", st.session_state.config)
 
 
 # Função para salvar histórico
@@ -695,3 +695,4 @@ if st.session_state.is_queue_running and st.session_state.download_queue and pag
     gerenciador_de_download(job['ydl_opts'], job['url'], job['tipo'], job['download_dir'], display_mode='toast')
     if st.session_state.current_download_title is None: # Se o download terminou
         st.session_state.download_queue.pop(0)
+
