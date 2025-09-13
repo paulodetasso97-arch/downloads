@@ -133,12 +133,12 @@ for page_name, icon in PAGES.items():
 pagina = st.session_state.pagina_atual
 
 # Define o papel de parede com base na página selecionada
-if pagina == "Baixar Filmes" and os.path.exists("wfwm.jpg"):
-    set_background("wfwm.jpg", st.session_state.config)
-elif pagina == "Baixar músicas" and os.path.exists("wfwm.jpg"):
-    set_background("wfwm.jpg", st.session_state.config)
-elif pagina == "Fila de Downloads" and os.path.exists("wd2.jpg"):
-    set_background("wd2.jpg", st.session_state.config)
+if pagina == "Baixar Filmes" and os.path.exists("ww.jpg"):
+    set_background("ww.jpg", st.session_state.config)
+elif pagina == "Baixar músicas" and os.path.exists("ww.jpg"):
+    set_background("ww.jpg", st.session_state.config)
+elif pagina == "Fila de Downloads" and os.path.exists("ww.jpg"):
+    set_background("ww.jpg", st.session_state.config)
 elif os.path.exists("wallpaper1.jpg"):  # Papel de parede padrão para as outras páginas
     set_background("wallpaper1.jpg", st.session_state.config)
 
