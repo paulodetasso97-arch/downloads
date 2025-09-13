@@ -9,7 +9,17 @@ import time
 import json
 
 # --- Configurações Gerais ---
-FFMPEG_LOCATION = r"C:\Users\Paulo\Desktop\Projetos\Aplicativo para baixar arquivos\ffmpeg\bin" # Use r'' para caminhos no Windows
+# Usa um caminho relativo para o ffmpeg, tornando o app portável
+FFMPEG_LOCATION = os.path.join(os.path.dirname(__file__), "ffmpeg", "bin")
+
+# Diretórios de download
+DOWNLOAD_DIRS = {
+    "Youtube": "youtube_baixados",
+    "Instagram": "reels_baixados",
+    "Twitter": "twitter_baixados",
+    "Filme": "filmes_baixados",
+    "Música": "musicas_baixadas"
+}
 
 st.set_page_config(page_title="App do Paulim", layout="centered", page_icon="🎵")
 
@@ -107,6 +117,11 @@ def save_config(config):
 if 'config' not in st.session_state:
     st.session_state.config = load_config()
 
+# --- Função para criar diretórios ---
+def criar_diretorios():
+    for diretorio in DOWNLOAD_DIRS.values():
+        os.makedirs(diretorio, exist_ok=True)
+
 # --- Definição das Páginas ---
 PAGES = {
     "Baixar Vídeos": "📥",
@@ -118,6 +133,9 @@ PAGES = {
     "Histórico de downloads": "📜",
     "Configurações": "⚙️"
 }
+
+# Cria os diretórios na inicialização
+criar_diretorios()
 
 # --- Lógica da Página Atual ---
 if 'pagina_atual' not in st.session_state:
@@ -271,13 +289,13 @@ def pagina_baixar_videos():
             reel_url = st.text_input("URL do Reel:")
             submitted = st.form_submit_button("Baixar Reel Agora")
         if submitted and reel_url:
+            download_dir = DOWNLOAD_DIRS["Instagram"]
             with st.spinner("Baixando o Reel... Por favor, aguarde."):
                 try:
                     if "/reel/" not in reel_url:
                         st.error("Por favor, insira uma URL válida de um Reel do Instagram.")
-                        return
+                        st.stop()
                     post_code = reel_url.split("/reel/")[1].split("/")[0]
-                    download_dir = "reels_baixados"
                     os.makedirs(download_dir, exist_ok=True)
                     L = instaloader.Instaloader()
                     post = instaloader.Post.from_shortcode(L.context, post_code)
@@ -297,8 +315,8 @@ def pagina_baixar_videos():
         if submitted and tw_url:
             job = {
                 "url": tw_url, "title": tw_url,
-                "ydl_opts": {'outtmpl': 'twitter_baixados/%(title)s.%(ext)s'},
-                "tipo": "Twitter", "download_dir": "twitter_baixados"
+                "ydl_opts": {'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s'},
+                "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]
             }
             st.session_state.download_queue.append(job)
             st.success(f"Vídeo do Twitter adicionado à fila.")
@@ -309,10 +327,11 @@ def adicionar_filme_a_fila(video_url, video_title):
     """Adiciona um filme à fila de downloads."""
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': 'filmes_baixados/%(title)s.%(ext)s',
+        'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
         'ffmpeg_location': FFMPEG_LOCATION,
     }
-    job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts, "tipo": "Filme", "download_dir": "filmes_baixados"}
+    job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
+           "tipo": "Filme", "download_dir": DOWNLOAD_DIRS["Filme"]}
     st.session_state.download_queue.append(job)
     st.success(f"Adicionado à fila: {video_title}")
 
@@ -323,6 +342,7 @@ def pagina_filmes():
         submitted = st.form_submit_button("Pesquisar Filme")
 
     if submitted:
+        st.session_state.film_search_results = [] # Limpa resultados anteriores
         if search_query:
             # Adiciona "filme" à consulta para refinar a busca
             full_search_query = f"{search_query} filme"
@@ -338,19 +358,19 @@ def pagina_filmes():
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(full_search_query, download=False)
-                        st.session_state.search_results = results.get('entries', [])
-                        if not st.session_state.search_results:
+                        st.session_state.film_search_results = results.get('entries', [])
+                        if not st.session_state.film_search_results:
                             st.warning("Nenhum resultado encontrado.")
                 except Exception as e:
                     st.error(f"Erro na pesquisa: {e}")
-                    st.session_state.search_results = []
+                    st.session_state.film_search_results = []
         else:
             st.warning("Por favor, digite algo para pesquisar.")
 
-    if 'search_results' in st.session_state and st.session_state.search_results:
+    if 'film_search_results' in st.session_state and st.session_state.film_search_results:
         st.markdown("---")
         st.subheader("Resultados da Pesquisa")
-        for i, entry in enumerate(st.session_state.search_results):
+        for i, entry in enumerate(st.session_state.film_search_results):
             col1, col2, col3 = st.columns([1, 4, 1])
             with col1:
                 thumbnail_url = entry.get('thumbnail')
@@ -433,14 +453,15 @@ def adicionar_musica_a_fila(video_url, video_title):
     ydl_opts = {
         'ffmpeg_location': FFMPEG_LOCATION,
         'format': 'bestaudio/best',
-        'outtmpl': 'musicas_baixadas/%(title)s.%(ext)s',
+        'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
     }
-    job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts, "tipo": "Música", "download_dir": "musicas_baixadas"}
+    job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
+           "tipo": "Música", "download_dir": DOWNLOAD_DIRS["Música"]}
     st.session_state.download_queue.append(job)
     st.success(f"Adicionado à fila: {video_title}")
 
@@ -456,7 +477,7 @@ def pagina_musicas():
                 try:
                     # Inicia o download direto sem adicionar à fila
                     st.info("Preparando para baixar a música...")
-                    download_dir = "musicas_baixadas"
+                    download_dir = DOWNLOAD_DIRS["Música"]
                     ydl_opts = {
                         'ffmpeg_location': FFMPEG_LOCATION,
                         'format': 'bestaudio/best',
@@ -478,6 +499,7 @@ def pagina_musicas():
         search_submitted = st.form_submit_button("Pesquisar Música")
 
     if search_submitted:
+        st.session_state.music_search_results = [] # Limpa resultados anteriores
         if search_query:
             with st.spinner(f"Pesquisando por '{search_query}'..."):
                 try:
@@ -541,7 +563,7 @@ def pagina_historico():
 
 def pagina_playlist():
     st.title("🎶 Minhas músicas & Playlists")
-    download_dir = "musicas_baixadas"
+    download_dir = DOWNLOAD_DIRS["Música"]
     if os.path.exists(download_dir):
         arquivos = sorted([f for f in os.listdir(download_dir) if f.endswith(".mp3")])
 
@@ -628,7 +650,7 @@ def pagina_configuracoes():
 
 def pagina_filmes_baixados():
     st.title("🎬 Filmes Baixados")
-    download_dir = "filmes_baixados"
+    download_dir = DOWNLOAD_DIRS["Filme"]
     if os.path.exists(download_dir):
         # Filtra por extensões de vídeo comuns
         video_extensions = ['.mp4', '.mkv', '.webm', '.flv', '.avi']
