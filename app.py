@@ -149,6 +149,7 @@ def get_yt_dlp_options(output_template, postprocessors=None):
             'Accept-Language': 'en-US,en;q=0.9'
         },
         'nocheckcertificate': True, # Adicionado para contornar possíveis problemas de SSL
+        'no_mtime': True, # Impede a modificação do tempo do arquivo
         'ffmpeg_location': FFMPEG_LOCATION,
     }
     if postprocessors:
@@ -156,6 +157,81 @@ def get_yt_dlp_options(output_template, postprocessors=None):
     if st.session_state.config.get("youtube_cookies"):
         options['cookiefile'] = "cookies.txt"
     return options
+
+    def progress_hook(d):
+        if st.session_state.get('cancel_download', False):
+            raise yt_dlp.utils.DownloadCancelled()
+        while st.session_state.get('is_paused', False):
+            time.sleep(1)
+
+        # Captura o caminho do arquivo final quando o download termina
+        if d['status'] == 'finished':
+            st.session_state['final_filepath'] = d.get('filename')
+
+        if d['status'] == 'downloading':
+            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+            if total_bytes:
+                percent = d['downloaded_bytes'] / total_bytes
+                progress_text = f"Baixando... {int(percent * 100)}%"
+                if st.session_state.get('progress_placeholder'):
+                    st.session_state.progress_placeholder.progress(percent, text=progress_text)
+                elif st.session_state.get('display_mode') == 'toast':
+                    # Atualiza o toast apenas em intervalos para não sobrecarregar
+                    if int(percent * 100) % 10 == 0:
+                        st.toast(progress_text)
+
+        elif d['status'] == 'finished':
+            if ydl_opts.get('postprocessors'):
+                if st.session_state.get('progress_placeholder'):
+                    st.session_state.progress_placeholder.progress(1.0, text="Download concluído. Convertendo...")
+            else:
+                if st.session_state.get('progress_placeholder'):
+                    st.session_state.progress_placeholder.progress(1.0, text="Download concluído!")
+
+def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
+    """Gerencia o processo de download com yt-dlp de forma simplificada."""
+    st.session_state.progress_placeholder = st.empty()
+    st.session_state.download_button_placeholder = st.empty()
+    st.session_state.display_mode = display_mode
+    st.session_state['final_filepath'] = None
+
+    ydl_opts['progress_hooks'] = [progress_hook]
+
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url_ou_lista_urls, download=True)
+            title = info.get('title', url_ou_lista_urls)
+            st.success(f"Download concluído no servidor: {title}")
+            salvar_historico(tipo, url_ou_lista_urls, download_dir)
+            st.balloons()
+
+            final_filepath = st.session_state.get('final_filepath')
+            if final_filepath and os.path.exists(final_filepath):
+                file_name = os.path.basename(final_filepath)
+                with open(final_filepath, "rb") as file:
+                    st.session_state.download_button_placeholder.download_button(
+                        label=f"⬇️ Baixar '{file_name}' para seu dispositivo",
+                        data=file,
+                        file_name=file_name,
+                        mime="application/octet-stream"
+                    )
+
+    except yt_dlp.utils.DownloadCancelled:
+        st.info("Download cancelado pelo usuário.")
+    except yt_dlp.utils.DownloadError as e:
+        st.error(f"Erro no download: {e}")
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {e}")
+    finally:
+        st.session_state.current_download_title = None
+        if 'progress_placeholder' in st.session_state:
+            st.session_state.progress_placeholder.empty()
+            del st.session_state['progress_placeholder']
+        if 'download_button_placeholder' in st.session_state:
+            # Não limpa o botão de download para que o usuário possa clicar
+            pass
+
 # --- Lógica da Página Atual ---
 if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = "Baixar Vídeos" # Página padrão
@@ -170,11 +246,7 @@ for page_name, icon in PAGES.items():
 pagina = st.session_state.pagina_atual
 
 # Define o papel de parede com base na página selecionada
-if pagina == "Baixar Filmes" and os.path.exists("ww.jpg"):
-    set_background("ww.jpg", st.session_state.config)
-elif pagina == "Baixar músicas" and os.path.exists("ww.jpg"):
-    set_background("ww.jpg", st.session_state.config)
-elif pagina == "Fila de Downloads" and os.path.exists("ww.jpg"):
+if pagina in ["Baixar Filmes", "Baixar músicas", "Fila de Downloads"] and os.path.exists("ww.jpg"):
     set_background("ww.jpg", st.session_state.config)
 elif os.path.exists("wallpaper1.jpg"):  # Papel de parede padrão para as outras páginas
     set_background("wallpaper1.jpg", st.session_state.config)
@@ -191,125 +263,6 @@ if 'current_download_title' not in st.session_state:
 def salvar_historico(tipo, url, arquivo):
     with open("historico.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} | {tipo} | {url} | {arquivo}\n")
-
-def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
-    """
-    Gerencia o processo de download com yt-dlp.
-    display_mode: 'full' para barra de progresso e botões, 'toast' para notificações.
-    """
-    progress_placeholder = st.empty()
-    button_placeholder = st.empty()
-    
-    # Placeholder para o botão de download final
-    download_button_placeholder = st.empty()
-    
-    # (O restante do código de botões de pausa/cancelamento...)
-
-    final_filepath = None
-
-    def progress_hook(d):
-        nonlocal final_filepath
-        # (O restante do código do hook...)
-
-        if d['status'] == 'finished':
-            final_filepath = d.get('filename') # Captura o caminho do arquivo final
-            # (O restante do código de "Download Concluído"...)
-
-    ydl_opts['progress_hooks'] = [progress_hook]
-
-    try:
-        os.makedirs(download_dir, exist_ok=True)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url_ou_lista_urls, download=True)
-            st.success(f"Download concluído no servidor: {info.get('title')}")
-            salvar_historico(tipo, url_ou_lista_urls, download_dir)
-
-            # --- ESTE É O PASSO CRUCIAL PARA APPS NA NUVEM ---
-            if final_filepath and os.path.exists(final_filepath):
-                # Extrai apenas o nome do arquivo para o botão
-                file_name = os.path.basename(final_filepath) 
-                
-                with open(final_filepath, "rb") as file:
-                    download_button_placeholder.download_button(
-                        label=f"⬇️ Baixar '{file_name}' para seu dispositivo",
-                        data=file,
-                        file_name=file_name,
-                        mime="application/octet-stream"
-                    )
-            
-            st.balloons()
-            
-    except Exception as e:
-        st.error(f"Ocorreu um erro inesperado: {e}")
-    finally:
-        st.session_state.current_download_title = None
-        st.session_state.cancel_download = False
-        st.session_state.is_paused = False
-        if display_mode == 'full' and progress_placeholder:
-            progress_placeholder.empty()
-            button_placeholder.empty()
-
-        # Colunas para os botões
-        col1, col2 = button_placeholder.columns(2)
-        pause_label = "Retomar" if st.session_state.is_paused else "Pausar"
-        if col1.button(pause_label, key="pause_resume"):
-            st.session_state.is_paused = not st.session_state.is_paused
-            st.rerun() # Força o rerender para atualizar o label do botão
-
-        if col2.button("Cancelar Download", key="cancel"):
-            st.session_state.cancel_download = True
-            st.warning("Cancelamento solicitado... aguardando o término do bloco atual.")
-
-    def progress_hook(d):
-        if st.session_state.get('cancel_download', False):
-            raise yt_dlp.utils.DownloadCancelled()
-        while st.session_state.get('is_paused', False):
-            time.sleep(1)
-
-        if d['status'] == 'downloading':
-            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-            if total_bytes:
-                percent = d['downloaded_bytes'] / total_bytes
-                progress_text = f"Baixando... {int(percent * 100)}%"
-                if display_mode == 'full' and progress_placeholder:
-                    progress_placeholder.progress(percent, text=progress_text)
-                elif display_mode == 'toast':
-                    # Atualiza o toast apenas em intervalos para não sobrecarregar
-                    if int(percent * 100) % 10 == 0:
-                        st.toast(progress_text)
-
-        elif d['status'] == 'finished':
-            if ydl_opts.get('postprocessors'):
-                if display_mode == 'full' and progress_placeholder:
-                    progress_placeholder.progress(1.0, text="Download concluído. Convertendo...")
-            else:
-                if display_mode == 'full' and progress_placeholder:
-                    progress_placeholder.progress(1.0, text="Download concluído!")
-
-    ydl_opts['progress_hooks'] = [progress_hook]
-
-    try:
-        os.makedirs(download_dir, exist_ok=True)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url_ou_lista_urls, download=True)
-            title = info.get('title') if isinstance(info, dict) else url_ou_lista_urls
-            st.success(f"Download concluído com sucesso: {title}")
-            salvar_historico(tipo, url_ou_lista_urls, download_dir)
-            st.balloons()
-    except yt_dlp.utils.DownloadCancelled:
-        st.info("Download cancelado pelo usuário.")
-    except yt_dlp.utils.DownloadError as e:
-        st.error(f"Erro no download: {e}")
-    except Exception as e:
-        st.error(f"Ocorreu um erro inesperado: {e}")
-    finally:
-        # Limpa os placeholders e reseta o estado
-        st.session_state.current_download_title = None
-        st.session_state.cancel_download = False
-        st.session_state.is_paused = False
-        if display_mode == 'full' and progress_placeholder:
-            progress_placeholder.empty()
-            button_placeholder.empty()
 
 def pagina_baixar_videos():
     st.title("📥 Baixar Vídeos")
