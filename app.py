@@ -151,6 +151,7 @@ def get_yt_dlp_options(output_template, postprocessors=None):
         'nocheckcertificate': True, # Adicionado para contornar possíveis problemas de SSL
         'no_mtime': True, # Impede a modificação do tempo do arquivo
         'ffmpeg_location': FFMPEG_LOCATION,
+        'nopart': True, # Não usar arquivos .part, baixar diretamente para o arquivo final
     }
     if postprocessors:
         options['postprocessors'] = postprocessors
