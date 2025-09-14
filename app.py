@@ -157,6 +157,10 @@ def get_yt_dlp_options(output_template, postprocessors=None):
         options['postprocessors'] = postprocessors
     if st.session_state.config.get("youtube_cookies"):
         options['cookiefile'] = "cookies.txt"
+    
+    browser = st.session_state.config.get("browser_cookies", "Nenhum")
+    if browser != "Nenhum":
+        options['cookies-from-browser'] = browser.lower()
     return options
 
 def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
