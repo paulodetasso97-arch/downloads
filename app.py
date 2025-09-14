@@ -105,7 +105,8 @@ def load_config():
         "tema": "Padrão",
         "volume": 70,
         "layout": "Moderno",
-        "browser_cookies": "Nenhum"
+        "browser_cookies": "Nenhum",
+        "youtube_cookies": ""
     }
 
 def save_config(config):
@@ -116,6 +117,11 @@ def save_config(config):
 # Carrega a configuração no início da execução e armazena no estado da sessão
 if 'config' not in st.session_state:
     st.session_state.config = load_config()
+
+# --- Função para criar diretórios ---
+def criar_diretorios():
+    for diretorio in DOWNLOAD_DIRS.values():
+        os.makedirs(diretorio, exist_ok=True)
 
 # --- Definição das Páginas ---
 PAGES = {
@@ -130,8 +136,7 @@ PAGES = {
 }
 
 # Cria os diretórios na inicialização
-for diretorio in DOWNLOAD_DIRS.values():
-    os.makedirs(diretorio, exist_ok=True)
+criar_diretorios()
 
 # --- Lógica da Página Atual ---
 if 'pagina_atual' not in st.session_state:
@@ -156,6 +161,7 @@ elif pagina == "Fila de Downloads" and os.path.exists("ww.jpg"):
 elif os.path.exists("wallpaper1.jpg"):  # Papel de parede padrão para as outras páginas
     set_background("wallpaper1.jpg", st.session_state.config)
 
+
 # Função para salvar histórico
 if 'download_queue' not in st.session_state:
     st.session_state.download_queue = []
@@ -168,10 +174,6 @@ def salvar_historico(tipo, url, arquivo):
     with open("historico.txt", "a", encoding="utf-8") as f:
         f.write(f"{datetime.now()} | {tipo} | {url} | {arquivo}\n")
 
-# Variáveis globais para controle de download
-st.session_state.is_paused = False
-st.session_state.cancel_download = False
-
 def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
     """
     Gerencia o processo de download com yt-dlp.
@@ -179,11 +181,68 @@ def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, dis
     """
     progress_placeholder = st.empty()
     button_placeholder = st.empty()
+    
+    # Placeholder para o botão de download final
     download_button_placeholder = st.empty()
+    
+    # (O restante do código de botões de pausa/cancelamento...)
+
     final_filepath = None
 
     def progress_hook(d):
         nonlocal final_filepath
+        # (O restante do código do hook...)
+
+        if d['status'] == 'finished':
+            final_filepath = d.get('filename') # Captura o caminho do arquivo final
+            # (O restante do código de "Download Concluído"...)
+
+    ydl_opts['progress_hooks'] = [progress_hook]
+
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url_ou_lista_urls, download=True)
+            st.success(f"Download concluído no servidor: {info.get('title')}")
+            salvar_historico(tipo, url_ou_lista_urls, download_dir)
+
+            # --- ESTE É O PASSO CRUCIAL PARA APPS NA NUVEM ---
+            if final_filepath and os.path.exists(final_filepath):
+                # Extrai apenas o nome do arquivo para o botão
+                file_name = os.path.basename(final_filepath) 
+                
+                with open(final_filepath, "rb") as file:
+                    download_button_placeholder.download_button(
+                        label=f"⬇️ Baixar '{file_name}' para seu dispositivo",
+                        data=file,
+                        file_name=file_name,
+                        mime="application/octet-stream"
+                    )
+            
+            st.balloons()
+            
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {e}")
+    finally:
+        st.session_state.current_download_title = None
+        st.session_state.cancel_download = False
+        st.session_state.is_paused = False
+        if display_mode == 'full' and progress_placeholder:
+            progress_placeholder.empty()
+            button_placeholder.empty()
+
+        # Colunas para os botões
+        col1, col2 = button_placeholder.columns(2)
+        pause_label = "Retomar" if st.session_state.is_paused else "Pausar"
+        if col1.button(pause_label, key="pause_resume"):
+            st.session_state.is_paused = not st.session_state.is_paused
+            st.rerun() # Força o rerender para atualizar o label do botão
+
+        if col2.button("Cancelar Download", key="cancel"):
+            st.session_state.cancel_download = True
+            st.warning("Cancelamento solicitado... aguardando o término do bloco atual.")
+
+    def progress_hook(d):
         if st.session_state.get('cancel_download', False):
             raise yt_dlp.utils.DownloadCancelled()
         while st.session_state.get('is_paused', False):
@@ -197,11 +256,11 @@ def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, dis
                 if display_mode == 'full' and progress_placeholder:
                     progress_placeholder.progress(percent, text=progress_text)
                 elif display_mode == 'toast':
+                    # Atualiza o toast apenas em intervalos para não sobrecarregar
                     if int(percent * 100) % 10 == 0:
                         st.toast(progress_text)
 
         elif d['status'] == 'finished':
-            final_filepath = d.get('filename') # Captura o caminho do arquivo final
             if ydl_opts.get('postprocessors'):
                 if display_mode == 'full' and progress_placeholder:
                     progress_placeholder.progress(1.0, text="Download concluído. Convertendo...")
@@ -219,18 +278,6 @@ def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, dis
             st.success(f"Download concluído com sucesso: {title}")
             salvar_historico(tipo, url_ou_lista_urls, download_dir)
             st.balloons()
-            
-            # Botão de download para o usuário
-            if final_filepath and os.path.exists(final_filepath):
-                file_name = os.path.basename(final_filepath)
-                with open(final_filepath, "rb") as file:
-                    download_button_placeholder.download_button(
-                        label=f"⬇️ Baixar '{file_name}' para seu dispositivo",
-                        data=file,
-                        file_name=file_name,
-                        mime="application/octet-stream"
-                    )
-                    
     except yt_dlp.utils.DownloadCancelled:
         st.info("Download cancelado pelo usuário.")
     except yt_dlp.utils.DownloadError as e:
@@ -238,6 +285,7 @@ def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, dis
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado: {e}")
     finally:
+        # Limpa os placeholders e reseta o estado
         st.session_state.current_download_title = None
         st.session_state.cancel_download = False
         st.session_state.is_paused = False
@@ -245,23 +293,14 @@ def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, dis
             progress_placeholder.empty()
             button_placeholder.empty()
 
-    if display_mode == 'full':
-        col1, col2 = button_placeholder.columns(2)
-        pause_label = "Retomar" if st.session_state.is_paused else "Pausar"
-        if col1.button(pause_label, key="pause_resume"):
-            st.session_state.is_paused = not st.session_state.is_paused
-            st.rerun()
-
-        if col2.button("Cancelar Download", key="cancel"):
-            st.session_state.cancel_download = True
-            st.warning("Cancelamento solicitado... aguardando o término do bloco atual.")
-
 def pagina_baixar_videos():
     st.title("📥 Baixar Vídeos")
 
+    # Inicializa o estado da seleção se não existir
     if 'video_source' not in st.session_state:
         st.session_state.video_source = "YouTube"
 
+    # Cria os cards em colunas
     col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("YouTube", use_container_width=True):
@@ -273,12 +312,7 @@ def pagina_baixar_videos():
         if st.button("Twitter", use_container_width=True):
             st.session_state.video_source = "Twitter"
 
-    # Reforçar User-Agent para tentar evitar bloqueios
-    common_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-    }
-
+    # Exibe o formulário correspondente à seleção
     if st.session_state.video_source == "YouTube":
         with st.form(key="youtube_form"):
             yt_url = st.text_input("URL do vídeo do Youtube:")
@@ -287,11 +321,18 @@ def pagina_baixar_videos():
             job = {
                 "url": yt_url, "title": yt_url,
                 "ydl_opts": {
-                    'outtmpl': 'youtube_baixados/%(title)s.%(ext)s',
-                    'http_headers': common_headers
+                    'outtmpl': f'{DOWNLOAD_DIRS["Youtube"]}/%(title)s.%(ext)s',
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
                 },
-                "tipo": "Youtube", "download_dir": "youtube_baixados"
+                "tipo": "Youtube", "download_dir": DOWNLOAD_DIRS["Youtube"]
             }
+            # Adiciona cookies se estiverem configurados
+            if st.session_state.config.get("youtube_cookies"):
+                job["ydl_opts"]['cookiefile'] = "cookies.txt"
+
             st.session_state.download_queue.append(job)
             st.success(f"Vídeo do YouTube adicionado à fila.")
         elif submitted:
@@ -309,10 +350,11 @@ def pagina_baixar_videos():
                         st.stop()
                     post_code = reel_url.split("/reel/")[1].split("/")[0]
                     download_dir = DOWNLOAD_DIRS["Instagram"]
-                    os.makedirs(download_dir, exist_ok=True)
-                    L = instaloader.Instaloader(save_metadata=False, download_comments=False,
-                                                 filename_pattern="{profile}_{shortcode}",
-                                                 post_metadata_txt_pattern="")
+                    os.makedirs(download_dir, exist_ok=True)                    
+                    # Inicializa o Instaloader sem salvar arquivos de sessão para compatibilidade com a nuvem
+                    L = instaloader.Instaloader(save_metadata=False, download_comments=False, 
+                                                filename_pattern="{profile}_{shortcode}",
+                                                post_metadata_txt_pattern="")
                     post = instaloader.Post.from_shortcode(L.context, post_code)
                     L.download_post(post, target=download_dir)
                     st.success(f"Reel baixado com sucesso!")
@@ -332,7 +374,10 @@ def pagina_baixar_videos():
                 "url": tw_url, "title": tw_url,
                 "ydl_opts": {
                     'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s',
-                    'http_headers': common_headers
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
                 },
                 "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]
             }
@@ -342,15 +387,15 @@ def pagina_baixar_videos():
             st.warning("Insira a URL do vídeo do Twitter.")
 
 def adicionar_filme_a_fila(video_url, video_title):
-    common_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-    }
+    """Adiciona um filme à fila de downloads."""
     ydl_opts = {
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
         'ffmpeg_location': FFMPEG_LOCATION,
-        'http_headers': common_headers,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9'
+        },
     }
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Filme", "download_dir": DOWNLOAD_DIRS["Filme"]}
@@ -364,21 +409,27 @@ def pagina_filmes():
         submitted = st.form_submit_button("Pesquisar Filme")
 
     if submitted:
-        st.session_state.film_search_results = []
+        st.session_state.film_search_results = [] # Limpa resultados anteriores
         if search_query:
-            full_search_query = f"{search_query} filme completo" # Adicionando "completo"
+            # Adiciona "filme" à consulta para refinar a busca
+            full_search_query = f"{search_query} filme"
             with st.spinner(f"Pesquisando por '{full_search_query}'..."):
                 try:
-                    common_headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
+                    # Limita a busca aos 5 primeiros resultados com 'ytsearch5:'
                     ydl_opts = {
                         'quiet': True,
                         'default_search': 'ytsearch5',
                         'extract_flat': 'in_playlist',
-                        'http_headers': common_headers
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        }
                     }
+                    # Adiciona cookies se estiverem configurados
+                    if st.session_state.config.get("youtube_cookies"):
+                        ydl_opts['cookiefile'] = "cookies.txt"
+
+
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(full_search_query, download=False)
                         st.session_state.film_search_results = results.get('entries', [])
@@ -411,15 +462,19 @@ def pagina_filmes():
                         'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
                         'ffmpeg_location': FFMPEG_LOCATION,
                         'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
                             'Accept-Language': 'en-US,en;q=0.9'
                         },
                     }
+                    # Adiciona cookies se estiverem configurados
+                    if st.session_state.config.get("youtube_cookies"):
+                        ydl_opts['cookiefile'] = "cookies.txt"
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Filme", DOWNLOAD_DIRS["Filme"], display_mode='full')
-
+                    
 def pagina_fila_de_downloads():
     st.title("⏳ Fila de Downloads")
 
+    # Botão de Exportar Fila
     if st.session_state.download_queue:
         queue_json = json.dumps(st.session_state.download_queue, indent=4)
         st.download_button(
@@ -449,15 +504,18 @@ def pagina_fila_de_downloads():
     else:
         st.warning("A fila está parada.")
 
+    # Lógica de processamento da fila
     if st.session_state.is_queue_running and st.session_state.download_queue:
-        job = st.session_state.download_queue[0]
+        job = st.session_state.download_queue[0] # Pega o próximo sem remover ainda
         st.session_state.current_download_title = job['title']
-
+        
         st.markdown("---")
         st.subheader(f"Baixando agora: {job['title']}")
-
+        
+        # Chama o gerenciador com UI completa
         gerenciador_de_download(job['ydl_opts'], job['url'], job['tipo'], job['download_dir'], display_mode='full')
-
+        
+        # Se o download terminou (não foi pausado/cancelado), remove da fila e reroda
         if st.session_state.current_download_title is None:
             st.session_state.download_queue.pop(0)
             st.rerun()
@@ -467,6 +525,7 @@ def pagina_fila_de_downloads():
         st.subheader("Próximos na Fila")
         for i, job in enumerate(st.session_state.download_queue):
             c1, c2 = st.columns([4, 1])
+            # Pula o primeiro item se um download já estiver em andamento
             if st.session_state.current_download_title and i == 0:
                 continue
             c1.write(f"{i + 1}. {job['title']}")
@@ -477,16 +536,20 @@ def pagina_fila_de_downloads():
         st.info("A fila de downloads está vazia.")
 
 def adicionar_musica_a_fila(video_url, video_title):
-    common_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9'
-    }
+    """Adiciona uma música à fila de downloads para conversão em MP3."""
     ydl_opts = {
         'ffmpeg_location': FFMPEG_LOCATION,
         'format': 'bestaudio/best',
         'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-        'http_headers': common_headers,
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9'
+        },
     }
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Música", "download_dir": DOWNLOAD_DIRS["Música"]}
@@ -503,20 +566,29 @@ def pagina_musicas():
         if link_submitted:
             if music_url:
                 try:
+                    # Inicia o download direto sem adicionar à fila
                     st.info("Preparando para baixar a música...")
                     download_dir = DOWNLOAD_DIRS["Música"]
-                    common_headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
                     ydl_opts = {
                         'ffmpeg_location': FFMPEG_LOCATION,
                         'format': 'bestaudio/best',
                         'outtmpl': f'{download_dir}/%(title)s.%(ext)s',
-                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                        'http_headers': common_headers,
+                        'postprocessors': [{
+                            'key': 'FFmpegExtractAudio',
+                            'preferredcodec': 'mp3',
+                            'preferredquality': '192',
+                        }],
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        },
                     }
+                    # Adiciona cookies se estiverem configurados
+                    if st.session_state.config.get("youtube_cookies"):
+                        ydl_opts['cookiefile'] = "cookies.txt"
+                    # Chama o gerenciador de download diretamente
                     gerenciador_de_download(ydl_opts, music_url, "Música", download_dir, display_mode='full')
+
                 except Exception as e:
                     st.error(f"Não foi possível obter informações do link: {e}")
 
@@ -525,20 +597,23 @@ def pagina_musicas():
         search_submitted = st.form_submit_button("Pesquisar Música")
 
     if search_submitted:
-        st.session_state.music_search_results = []
+        st.session_state.music_search_results = [] # Limpa resultados anteriores
         if search_query:
             with st.spinner(f"Pesquisando por '{search_query}'..."):
                 try:
-                    common_headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
                     ydl_opts = {
                         'quiet': True,
                         'default_search': 'ytsearch5',
                         'extract_flat': 'in_playlist',
-                        'http_headers': common_headers
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        }
                     }
+                    # Adiciona cookies se estiverem configurados
+                    if st.session_state.config.get("youtube_cookies"):
+                        ydl_opts['cookiefile'] = "cookies.txt"
+
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(search_query, download=False)
                         st.session_state.music_search_results = results.get('entries', [])
@@ -566,21 +641,25 @@ def pagina_musicas():
             with col3:
                 if st.button("Baixar Música", key=f"add_music_{i}"):
                     st.session_state.current_download_title = entry.get('title')
-                    common_headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
                     ydl_opts = {
                         'ffmpeg_location': FFMPEG_LOCATION,
                         'format': 'bestaudio/best',
                         'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
                         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                        'http_headers': common_headers,
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        },
+                    }
+                    # Adiciona cookies se estiverem configurados
+                    if st.session_state.config.get("youtube_cookies"):
+                        ydl_opts['cookiefile'] = "cookies.txt"
                     }
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Música", DOWNLOAD_DIRS["Música"], display_mode='full')
 
 def pagina_historico():
     st.title("📜 Histórico de downloads")
+    # Botão de Exportar Histórico
     if os.path.exists("historico.txt"):
         with open("historico.txt", "r", encoding="utf-8") as f:
             st.download_button(
@@ -589,6 +668,7 @@ def pagina_historico():
                 file_name="historico_exportado.txt",
                 mime="text/plain",
             )
+
     if os.path.exists("historico.txt"):
         with open("historico.txt", "r", encoding="utf-8") as f:
             linhas = f.readlines()
@@ -605,9 +685,12 @@ def pagina_playlist():
     download_dir = DOWNLOAD_DIRS["Música"]
     if os.path.exists(download_dir):
         arquivos = sorted([f for f in os.listdir(download_dir) if f.endswith(".mp3")])
+
         if not arquivos:
             st.info("Nenhuma música baixada ainda.")
             return
+
+        # Botão de Exportar Lista de Músicas
         lista_musicas_str = "\n".join(arquivos)
         st.download_button(
             label="📥 Exportar Lista de Músicas",
@@ -616,10 +699,12 @@ def pagina_playlist():
             mime="text/plain",
         )
         st.markdown("---")
+
         playlist = st.multiselect("Selecione músicas para criar uma playlist temporária", arquivos)
         if playlist:
             st.audio([os.path.join(download_dir, m) for m in playlist], format="audio/mp3")
             st.markdown("---")
+
         for i, musica in enumerate(arquivos):
             col1, col2 = st.columns([4, 1])
             with col1:
@@ -639,19 +724,32 @@ def pagina_playlist():
 
 def pagina_configuracoes():
     st.title("⚙️ Configurações")
+
+    # Carrega as configurações atuais para os widgets
     current_config = st.session_state.config
+
     st.subheader("Aparência")
     tema = st.selectbox("Tema do app", ["Padrão", "Vermelho"], index=["Padrão", "Vermelho"].index(current_config.get("tema", "Padrão")))
     layout = st.selectbox("Layout", ["Moderno", "Compacto", "Clássico"], index=["Moderno", "Compacto", "Clássico"].index(current_config.get("layout", "Moderno")))
+
     st.subheader("Player")
     volume = st.slider("Volume padrão do player", 0, 100, current_config.get("volume", 70))
     st.caption("Nota: O controle de volume ainda não é suportado pelos players padrão do Streamlit.")
+
     st.subheader("Downloads e Pesquisa")
-    browser_cookies = st.selectbox(
-        "Usar cookies do navegador para pesquisa (resolve erros 'Sign in to confirm you’re not a bot')",
-        ["Nenhum"]
+
+    # Campo para colar os cookies
+    youtube_cookies = st.text_area(
+        "Cookies do YouTube (formato Netscape)",
+        value=current_config.get("youtube_cookies", ""),
+        height=150,
+        help="Cole o conteúdo do seu arquivo cookies.txt aqui. Isso pode resolver erros 403 Forbidden e de restrição de idade/login."
     )
+
+    browser_cookies = "Nenhum" # Mantém a lógica anterior para não quebrar
+
     st.markdown("---")
+    # Botão para exportar as configurações atuais
     config_json = json.dumps(st.session_state.config, indent=4)
     st.download_button(
         label="📥 Exportar Configurações",
@@ -659,15 +757,24 @@ def pagina_configuracoes():
         file_name="config_exportada.json",
         mime="application/json",
     )
+
     if st.button("Salvar Preferências"):
+        # Cria um novo dicionário de configuração com os valores dos widgets
         new_config = {
             "tema": tema,
             "layout": layout,
             "volume": volume,
-            "browser_cookies": browser_cookies
+            "browser_cookies": browser_cookies,
+            "youtube_cookies": youtube_cookies
         }
-        save_config(new_config)
-        st.session_state.config = new_config
+        save_config(new_config) # Salva no arquivo config.json
+
+        # Salva os cookies em um arquivo se eles foram fornecidos
+        if youtube_cookies:
+            with open("cookies.txt", "w", encoding="utf-8") as f:
+                f.write(youtube_cookies)
+
+        st.session_state.config = new_config # Atualiza o estado da sessão
         st.success("Preferências salvas com sucesso! As mudanças de tema serão aplicadas ao recarregar a página.")
         st.balloons()
 
@@ -675,11 +782,15 @@ def pagina_filmes_baixados():
     st.title("🎬 Filmes Baixados")
     download_dir = DOWNLOAD_DIRS["Filme"]
     if os.path.exists(download_dir):
+        # Filtra por extensões de vídeo comuns
         video_extensions = ['.mp4', '.mkv', '.webm', '.flv', '.avi']
         arquivos = [f for f in os.listdir(download_dir) if os.path.splitext(f)[1].lower() in video_extensions]
+
         if not arquivos:
             st.info("Nenhum filme baixado ainda.")
             return
+
+        # Botão de Exportar Lista de Filmes
         lista_filmes_str = "\n".join(arquivos)
         st.download_button(
             label="📥 Exportar Lista de Filmes",
@@ -688,6 +799,8 @@ def pagina_filmes_baixados():
             mime="text/plain",
         )
         st.markdown("---")
+
+
         for i, filme in enumerate(sorted(arquivos)):
             col1, col2 = st.columns([4, 1])
             with col1:
@@ -701,6 +814,7 @@ def pagina_filmes_baixados():
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao deletar o filme: {e}")
+
             st.video(os.path.join(download_dir, filme))
             st.markdown("---")
     else:
@@ -725,10 +839,11 @@ elif pagina == "Configurações":
     pagina_configuracoes()
 
 # --- Lógica de Processamento da Fila em "Segundo Plano" ---
+# Se a fila estiver rodando e o usuário não estiver na página da fila
 if st.session_state.is_queue_running and st.session_state.download_queue and pagina != "Fila de Downloads":
     job = st.session_state.download_queue[0]
     st.session_state.current_download_title = job['title']
     st.toast(f"Iniciando download: {job['title']}")
     gerenciador_de_download(job['ydl_opts'], job['url'], job['tipo'], job['download_dir'], display_mode='toast')
-    if st.session_state.current_download_title is None:
+    if st.session_state.current_download_title is None: # Se o download terminou
         st.session_state.download_queue.pop(0)
