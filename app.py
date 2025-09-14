@@ -345,8 +345,11 @@ def pagina_baixar_videos():
                         st.stop()
                     post_code = reel_url.split("/reel/")[1].split("/")[0]
                     download_dir = DOWNLOAD_DIRS["Instagram"]
-                    os.makedirs(download_dir, exist_ok=True)
-                    L = instaloader.Instaloader()
+                    os.makedirs(download_dir, exist_ok=True)                    
+                    # Inicializa o Instaloader sem salvar arquivos de sessão para compatibilidade com a nuvem
+                    L = instaloader.Instaloader(save_metadata=False, download_comments=False, 
+                                                filename_pattern="{profile}_{shortcode}",
+                                                post_metadata_txt_pattern="")
                     post = instaloader.Post.from_shortcode(L.context, post_code)
                     L.download_post(post, target=download_dir)
                     st.success(f"Reel baixado com sucesso!")
