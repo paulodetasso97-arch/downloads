@@ -2,4 +2,7 @@ streamlit
 pandas
 plotly
 requests
+pytube
+yt-dlp
+instaloader
 # Não inclua mais instaloader, yt-dlp ou openpyxl
