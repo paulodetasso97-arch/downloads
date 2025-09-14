@@ -9,8 +9,8 @@ import time
 import json
 
 # --- Configurações Gerais ---
-# Usa um caminho relativo para o ffmpeg, tornando o app portável
-FFMPEG_LOCATION = os.path.join(os.path.dirname(__file__), "ffmpeg", "bin")
+# Define o caminho do FFmpeg. Em produção (nuvem), usa o ffmpeg do sistema.
+FFMPEG_LOCATION = "ffmpeg" if os.environ.get("STREAMLIT_SERVER_RUNNING") else os.path.join(os.path.dirname(__file__), "ffmpeg", "bin")
 
 # Diretórios de download
 DOWNLOAD_DIRS = {
