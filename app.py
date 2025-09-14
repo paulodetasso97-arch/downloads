@@ -178,14 +178,57 @@ def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, dis
     Gerencia o processo de download com yt-dlp.
     display_mode: 'full' para barra de progresso e botões, 'toast' para notificações.
     """
-    # Reseta os estados no início de um novo download
-    st.session_state.is_paused = False
-    st.session_state.cancel_download = False
+    progress_placeholder = st.empty()
+    button_placeholder = st.empty()
+    
+    # Placeholder para o botão de download final
+    download_button_placeholder = st.empty()
+    
+    # (O restante do código de botões de pausa/cancelamento...)
 
-    progress_placeholder, button_placeholder = None, None
-    if display_mode == 'full':
-        progress_placeholder = st.empty()
-        button_placeholder = st.empty()
+    final_filepath = None
+
+    def progress_hook(d):
+        nonlocal final_filepath
+        # (O restante do código do hook...)
+
+        if d['status'] == 'finished':
+            final_filepath = d.get('filename') # Captura o caminho do arquivo final
+            # (O restante do código de "Download Concluído"...)
+
+    ydl_opts['progress_hooks'] = [progress_hook]
+
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url_ou_lista_urls, download=True)
+            st.success(f"Download concluído no servidor: {info.get('title')}")
+            salvar_historico(tipo, url_ou_lista_urls, download_dir)
+
+            # --- ESTE É O PASSO CRUCIAL PARA APPS NA NUVEM ---
+            if final_filepath and os.path.exists(final_filepath):
+                # Extrai apenas o nome do arquivo para o botão
+                file_name = os.path.basename(final_filepath) 
+                
+                with open(final_filepath, "rb") as file:
+                    download_button_placeholder.download_button(
+                        label=f"⬇️ Baixar '{file_name}' para seu dispositivo",
+                        data=file,
+                        file_name=file_name,
+                        mime="application/octet-stream"
+                    )
+            
+            st.balloons()
+            
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {e}")
+    finally:
+        st.session_state.current_download_title = None
+        st.session_state.cancel_download = False
+        st.session_state.is_paused = False
+        if display_mode == 'full' and progress_placeholder:
+            progress_placeholder.empty()
+            button_placeholder.empty()
 
         # Colunas para os botões
         col1, col2 = button_placeholder.columns(2)
