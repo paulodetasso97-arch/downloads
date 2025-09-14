@@ -1,14 +1,18 @@
 import streamlit as st
+import instaloader
 import os
+import yt_dlp
 import requests
 from datetime import datetime
 import base64
+import time
 import json
-import time # Mantido caso alguma função futura precise dele
 
 # --- Configurações Gerais ---
+# Define o caminho do FFmpeg. Em produção (nuvem), usa o ffmpeg do sistema.
+FFMPEG_LOCATION = "ffmpeg" if os.environ.get("STREAMLIT_SERVER_RUNNING") else os.path.join(os.path.dirname(__file__), "ffmpeg", "bin")
 
-# Diretórios de download (apenas para fins de organização de código, não salvam permanentemente na nuvem)
+# Diretórios de download
 DOWNLOAD_DIRS = {
     "Youtube": "youtube_baixados",
     "Instagram": "reels_baixados",
@@ -21,20 +25,12 @@ st.set_page_config(page_title="App do Paulim", layout="centered", page_icon="�
 
 @st.cache_data
 def get_base64_of_bin_file(bin_file):
-    """Converte um arquivo de imagem em base64 para ser usado como fundo."""
-    try:
-        with open(bin_file, 'rb') as f:
-            data = f.read()
-        return base64.b64encode(data).decode()
-    except FileNotFoundError:
-        st.warning(f"Arquivo de imagem não encontrado: {bin_file}")
-        return None
+    with open(bin_file, 'rb') as f:
+        data = f.read()
+    return base64.b64encode(data).decode()
 
 def set_background(png_file, config):
-    """Define o papel de parede do aplicativo com base no arquivo de imagem e tema."""
     bin_str = get_base64_of_bin_file(png_file)
-    if not bin_str:
-        return # Não faz nada se o arquivo de imagem não foi encontrado
 
     # Define a cor de destaque com base na configuração do tema
     accent_color = "rgba(20, 80, 180, 0.8)" # Azul Padrão
@@ -77,10 +73,20 @@ def set_background(png_file, config):
 
     /* --- Media Query para Dispositivos Móveis --- */
     @media (max-width: 768px) {{
-        h1 {{ font-size: 28px !important; }}
-        h2 {{ font-size: 24px !important; }}
-        h3 {{ font-size: 20px !important; }}
-        .st-emotion-cache-1v0mbdj img {{ max-width: 100%; }}
+        /* Reduz o tamanho dos títulos para caberem melhor na tela */
+        h1 {{
+            font-size: 28px !important;
+        }}
+        h2 {{
+            font-size: 24px !important;
+        }}
+        h3 {{
+            font-size: 20px !important;
+        }}
+        /* Garante que as imagens nos resultados de busca não ultrapassem a largura da coluna */
+        .st-emotion-cache-1v0mbdj img {{
+             max-width: 100%;
+        }}
     }}
     </style>
     '''
@@ -92,12 +98,9 @@ CONFIG_FILE = "config.json"
 def load_config():
     """Carrega as configurações do usuário do arquivo JSON."""
     if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            st.warning("Arquivo de configuração corrompido. Usando configurações padrão.")
-            return { "tema": "Padrão", "volume": 70, "layout": "Moderno", "browser_cookies": "Nenhum" }
+        with open(CONFIG_FILE, 'r') as f:
+            return json.load(f)
+    # Retorna um dicionário de configurações padrão se o arquivo não existir
     return {
         "tema": "Padrão",
         "volume": 70,
@@ -107,24 +110,12 @@ def load_config():
 
 def save_config(config):
     """Salva as configurações do usuário no arquivo JSON."""
-    try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4)
-    except IOError as e:
-        st.error(f"Erro ao salvar configurações: {e}")
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=4)
 
 # Carrega a configuração no início da execução e armazena no estado da sessão
 if 'config' not in st.session_state:
     st.session_state.config = load_config()
-
-# --- Função para criar diretórios (apenas organizacionais) ---
-def criar_diretorios():
-    """Cria os diretórios de download se não existirem."""
-    for diretorio in DOWNLOAD_DIRS.values():
-        try:
-            os.makedirs(diretorio, exist_ok=True)
-        except OSError as e:
-            st.error(f"Erro ao criar diretório {diretorio}: {e}")
 
 # --- Definição das Páginas ---
 PAGES = {
@@ -139,289 +130,528 @@ PAGES = {
 }
 
 # Cria os diretórios na inicialização
-criar_diretorios()
+for diretorio in DOWNLOAD_DIRS.values():
+    os.makedirs(diretorio, exist_ok=True)
 
-# --- Lógica de Estado da Sessão ---
+# --- Lógica da Página Atual ---
 if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = "Baixar Vídeos" # Página padrão
-if 'download_queue' not in st.session_state:
-    st.session_state.download_queue = []
-if 'is_queue_running' not in st.session_state:
-    st.session_state.is_queue_running = False
-if 'current_download_title' not in st.session_state:
-    st.session_state.current_download_title = None
-if 'video_source' not in st.session_state: # Para página Baixar Vídeos
-    st.session_state.video_source = "YouTube"
-if 'film_search_results' not in st.session_state:
-    st.session_state.film_search_results = []
-if 'music_search_results' not in st.session_state:
-    st.session_state.music_search_results = []
-if 'cancel_download' not in st.session_state:
-    st.session_state.cancel_download = False
-if 'is_paused' not in st.session_state:
-    st.session_state.is_paused = False
 
-
-# --- Sidebar para navegação ---
+# Sidebar para navegação
 st.sidebar.title("App do Paulim")
 for page_name, icon in PAGES.items():
-    # Use a chave única para cada botão para evitar conflitos
-    button_key = f"sidebar_button_{page_name.replace(' ', '_')}"
-    if st.sidebar.button(f"{icon} {page_name}", key=button_key, use_container_width=True):
+    if st.sidebar.button(f"{icon} {page_name}", use_container_width=True):
         st.session_state.pagina_atual = page_name
         st.rerun() # Garante que a página mude imediatamente
 
 pagina = st.session_state.pagina_atual
 
 # Define o papel de parede com base na página selecionada
-wallpaper_file = "wallpaper1.jpg" # Papel de parede padrão
-if pagina == "Baixar Filmes" or pagina == "Baixar músicas" or pagina == "Fila de Downloads":
-    if os.path.exists("ww.jpg"):
-        wallpaper_file = "ww.jpg"
+if pagina == "Baixar Filmes" and os.path.exists("ww.jpg"):
+    set_background("ww.jpg", st.session_state.config)
+elif pagina == "Baixar músicas" and os.path.exists("ww.jpg"):
+    set_background("ww.jpg", st.session_state.config)
+elif pagina == "Fila de Downloads" and os.path.exists("ww.jpg"):
+    set_background("ww.jpg", st.session_state.config)
+elif os.path.exists("wallpaper1.jpg"):  # Papel de parede padrão para as outras páginas
+    set_background("wallpaper1.jpg", st.session_state.config)
 
-if os.path.exists(wallpaper_file):
-    set_background(wallpaper_file, st.session_state.config)
-else:
-    st.warning("Papel de parede não encontrado. Verifique os arquivos 'ww.jpg' ou 'wallpaper1.jpg'.")
+# Função para salvar histórico
+if 'download_queue' not in st.session_state:
+    st.session_state.download_queue = []
+if 'is_queue_running' not in st.session_state:
+    st.session_state.is_queue_running = False
+if 'current_download_title' not in st.session_state:
+    st.session_state.current_download_title = None
 
+def salvar_historico(tipo, url, arquivo):
+    with open("historico.txt", "a", encoding="utf-8") as f:
+        f.write(f"{datetime.now()} | {tipo} | {url} | {arquivo}\n")
 
-# --- Funções Auxiliares ---
+# Variáveis globais para controle de download
+st.session_state.is_paused = False
+st.session_state.cancel_download = False
 
-def salvar_historico(tipo, url, download_dir):
-    """Salva o registro de um download no arquivo historico.txt."""
+def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
+    """
+    Gerencia o processo de download com yt-dlp.
+    display_mode: 'full' para barra de progresso e botões, 'toast' para notificações.
+    """
+    progress_placeholder = st.empty()
+    button_placeholder = st.empty()
+    download_button_placeholder = st.empty()
+    final_filepath = None
+
+    def progress_hook(d):
+        nonlocal final_filepath
+        if st.session_state.get('cancel_download', False):
+            raise yt_dlp.utils.DownloadCancelled()
+        while st.session_state.get('is_paused', False):
+            time.sleep(1)
+
+        if d['status'] == 'downloading':
+            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+            if total_bytes:
+                percent = d['downloaded_bytes'] / total_bytes
+                progress_text = f"Baixando... {int(percent * 100)}%"
+                if display_mode == 'full' and progress_placeholder:
+                    progress_placeholder.progress(percent, text=progress_text)
+                elif display_mode == 'toast':
+                    if int(percent * 100) % 10 == 0:
+                        st.toast(progress_text)
+
+        elif d['status'] == 'finished':
+            final_filepath = d.get('filename') # Captura o caminho do arquivo final
+            if ydl_opts.get('postprocessors'):
+                if display_mode == 'full' and progress_placeholder:
+                    progress_placeholder.progress(1.0, text="Download concluído. Convertendo...")
+            else:
+                if display_mode == 'full' and progress_placeholder:
+                    progress_placeholder.progress(1.0, text="Download concluído!")
+
+    ydl_opts['progress_hooks'] = [progress_hook]
+
     try:
-        with open("historico.txt", "a", encoding="utf-8") as f:
-            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | {tipo} | {url} | {download_dir}\n")
-    except IOError as e:
-        st.error(f"Erro ao salvar histórico: {e}")
+        os.makedirs(download_dir, exist_ok=True)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url_ou_lista_urls, download=True)
+            title = info.get('title') if isinstance(info, dict) else url_ou_lista_urls
+            st.success(f"Download concluído com sucesso: {title}")
+            salvar_historico(tipo, url_ou_lista_urls, download_dir)
+            st.balloons()
+            
+            # Botão de download para o usuário
+            if final_filepath and os.path.exists(final_filepath):
+                file_name = os.path.basename(final_filepath)
+                with open(final_filepath, "rb") as file:
+                    download_button_placeholder.download_button(
+                        label=f"⬇️ Baixar '{file_name}' para seu dispositivo",
+                        data=file,
+                        file_name=file_name,
+                        mime="application/octet-stream"
+                    )
+                    
+    except yt_dlp.utils.DownloadCancelled:
+        st.info("Download cancelado pelo usuário.")
+    except yt_dlp.utils.DownloadError as e:
+        st.error(f"Erro no download: {e}")
+    except Exception as e:
+        st.error(f"Ocorreu um erro inesperado: {e}")
+    finally:
+        st.session_state.current_download_title = None
+        st.session_state.cancel_download = False
+        st.session_state.is_paused = False
+        if display_mode == 'full' and progress_placeholder:
+            progress_placeholder.empty()
+            button_placeholder.empty()
 
-# --- REMOVIDO: Gerenciador de download e related logic (yt-dlp) ---
-# Como yt-dlp e instaloader não funcionam no Streamlit Cloud,
-# a lógica de download direto e adição à fila foi removida.
-# As páginas que dependiam delas (Baixar Vídeos, Baixar Filmes, Baixar Músicas)
-# foram adaptadas para apenas exibir formulários de busca ou links,
-# sem a funcionalidade de download ativa.
+    if display_mode == 'full':
+        col1, col2 = button_placeholder.columns(2)
+        pause_label = "Retomar" if st.session_state.is_paused else "Pausar"
+        if col1.button(pause_label, key="pause_resume"):
+            st.session_state.is_paused = not st.session_state.is_paused
+            st.rerun()
 
-
-# --- Páginas do Aplicativo ---
+        if col2.button("Cancelar Download", key="cancel"):
+            st.session_state.cancel_download = True
+            st.warning("Cancelamento solicitado... aguardando o término do bloco atual.")
 
 def pagina_baixar_videos():
-    st.title("📥 Baixar Vídeos (Pesquisa)")
-    st.info("A funcionalidade de download direto não está disponível no Streamlit Cloud. Use para pesquisar.")
+    st.title("📥 Baixar Vídeos")
 
-    # Cria os cards em colunas
+    if 'video_source' not in st.session_state:
+        st.session_state.video_source = "YouTube"
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("YouTube", use_container_width=True, key="btn_yt_search"):
+        if st.button("YouTube", use_container_width=True):
             st.session_state.video_source = "YouTube"
     with col2:
-        if st.button("Instagram Reels", use_container_width=True, key="btn_ig_search"):
+        if st.button("Instagram Reels", use_container_width=True):
             st.session_state.video_source = "Instagram Reels"
     with col3:
-        if st.button("Twitter", use_container_width=True, key="btn_tw_search"):
+        if st.button("Twitter", use_container_width=True):
             st.session_state.video_source = "Twitter"
 
-    # Exibe o formulário correspondente à seleção
+    # Reforçar User-Agent para tentar evitar bloqueios
+    common_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+
     if st.session_state.video_source == "YouTube":
-        with st.form(key="youtube_search_form"):
+        with st.form(key="youtube_form"):
             yt_url = st.text_input("URL do vídeo do Youtube:")
-            submitted = st.form_submit_button("Pesquisar (Informações)")
+            submitted = st.form_submit_button("Adicionar à Fila")
         if submitted and yt_url:
-            st.info(f"Pesquisando informações para a URL: {yt_url}")
-            st.warning("A funcionalidade de download direto não está disponível.")
+            job = {
+                "url": yt_url, "title": yt_url,
+                "ydl_opts": {
+                    'outtmpl': 'youtube_baixados/%(title)s.%(ext)s',
+                    'http_headers': common_headers
+                },
+                "tipo": "Youtube", "download_dir": "youtube_baixados"
+            }
+            st.session_state.download_queue.append(job)
+            st.success(f"Vídeo do YouTube adicionado à fila.")
         elif submitted:
             st.warning("Insira a URL do vídeo.")
 
     elif st.session_state.video_source == "Instagram Reels":
-        with st.form(key="instagram_search_form"):
+        with st.form(key="instagram_form"):
             reel_url = st.text_input("URL do Reel:")
-            submitted = st.form_submit_button("Pesquisar (Informações)")
+            submitted = st.form_submit_button("Baixar Reel Agora")
         if submitted and reel_url:
-            st.info(f"Pesquisando informações para a URL: {reel_url}")
-            st.warning("A funcionalidade de download direto não está disponível.")
+            with st.spinner("Baixando o Reel... Por favor, aguarde."):
+                try:
+                    if "/reel/" not in reel_url:
+                        st.error("Por favor, insira uma URL válida de um Reel do Instagram.")
+                        st.stop()
+                    post_code = reel_url.split("/reel/")[1].split("/")[0]
+                    download_dir = DOWNLOAD_DIRS["Instagram"]
+                    os.makedirs(download_dir, exist_ok=True)
+                    L = instaloader.Instaloader(save_metadata=False, download_comments=False,
+                                                 filename_pattern="{profile}_{shortcode}",
+                                                 post_metadata_txt_pattern="")
+                    post = instaloader.Post.from_shortcode(L.context, post_code)
+                    L.download_post(post, target=download_dir)
+                    st.success(f"Reel baixado com sucesso!")
+                    salvar_historico("Instagram", reel_url, download_dir)
+                    st.balloons()
+                except Exception as e:
+                    st.error(f"Ocorreu um erro: {e}")
         elif submitted:
             st.warning("Por favor, insira a URL do Reel.")
 
     elif st.session_state.video_source == "Twitter":
-        with st.form(key="twitter_search_form"):
+        with st.form(key="twitter_form"):
             tw_url = st.text_input("URL do vídeo do Twitter:")
-            submitted = st.form_submit_button("Pesquisar (Informações)")
+            submitted = st.form_submit_button("Adicionar à Fila")
         if submitted and tw_url:
-            st.info(f"Pesquisando informações para a URL: {tw_url}")
-            st.warning("A funcionalidade de download direto não está disponível.")
+            job = {
+                "url": tw_url, "title": tw_url,
+                "ydl_opts": {
+                    'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s',
+                    'http_headers': common_headers
+                },
+                "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]
+            }
+            st.session_state.download_queue.append(job)
+            st.success(f"Vídeo do Twitter adicionado à fila.")
         elif submitted:
             st.warning("Insira a URL do vídeo do Twitter.")
 
+def adicionar_filme_a_fila(video_url, video_title):
+    common_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
+        'ffmpeg_location': FFMPEG_LOCATION,
+        'http_headers': common_headers,
+    }
+    job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
+           "tipo": "Filme", "download_dir": DOWNLOAD_DIRS["Filme"]}
+    st.session_state.download_queue.append(job)
+    st.success(f"Adicionado à fila: {video_title}")
+
 def pagina_filmes():
-    st.title("🎬 Pesquisar Filmes")
-    st.info("A funcionalidade de download direto não está disponível no Streamlit Cloud. Use para pesquisar.")
+    st.title("🎬 Baixar Filmes")
     with st.form(key="film_search_form"):
         search_query = st.text_input("Pesquisar filme:", placeholder="Ex: O Senhor dos Anéis")
         submitted = st.form_submit_button("Pesquisar Filme")
 
     if submitted:
+        st.session_state.film_search_results = []
         if search_query:
-            st.info(f"Pesquisando por filmes relacionados a: '{search_query}'")
-            st.warning("A funcionalidade de download direto não está disponível.")
+            full_search_query = f"{search_query} filme completo" # Adicionando "completo"
+            with st.spinner(f"Pesquisando por '{full_search_query}'..."):
+                try:
+                    common_headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
+                    ydl_opts = {
+                        'quiet': True,
+                        'default_search': 'ytsearch5',
+                        'extract_flat': 'in_playlist',
+                        'http_headers': common_headers
+                    }
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        results = ydl.extract_info(full_search_query, download=False)
+                        st.session_state.film_search_results = results.get('entries', [])
+                        if not st.session_state.film_search_results:
+                            st.warning("Nenhum resultado encontrado.")
+                except Exception as e:
+                    st.error(f"Erro na pesquisa: {e}")
+                    st.session_state.film_search_results = []
         else:
             st.warning("Por favor, digite algo para pesquisar.")
 
-def pagina_musicas():
-    st.title("🎵 Baixar músicas (Pesquisa)")
-    st.info("A funcionalidade de download direto não está disponível no Streamlit Cloud. Use para pesquisar.")
+    if 'film_search_results' in st.session_state and st.session_state.film_search_results:
+        st.markdown("---")
+        st.subheader("Resultados da Pesquisa")
+        for i, entry in enumerate(st.session_state.film_search_results):
+            col1, col2, col3 = st.columns([1, 4, 1])
+            with col1:
+                thumbnail_url = entry.get('thumbnail')
+                if thumbnail_url:
+                    st.image(thumbnail_url, width=120)
+            with col2:
+                st.markdown(f"**{entry.get('title')}**")
+                duration = entry.get('duration_string', 'N/A')
+                st.caption(f"Duração: {duration}")
+            with col3:
+                if st.button("Baixar Filme", key=f"add_film_{i}"):
+                    st.session_state.current_download_title = entry.get('title')
+                    ydl_opts = {
+                        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+                        'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
+                        'ffmpeg_location': FFMPEG_LOCATION,
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        },
+                    }
+                    gerenciador_de_download(ydl_opts, entry.get('url'), "Filme", DOWNLOAD_DIRS["Filme"], display_mode='full')
 
-    with st.expander("Ou pesquise por link direto"):
+def pagina_fila_de_downloads():
+    st.title("⏳ Fila de Downloads")
+
+    if st.session_state.download_queue:
+        queue_json = json.dumps(st.session_state.download_queue, indent=4)
+        st.download_button(
+            label="📥 Exportar Fila",
+            data=queue_json,
+            file_name="fila_downloads.json",
+            mime="application/json",
+        )
+        st.markdown("---")
+
+    col1, col2, col3 = st.columns(3)
+    if col1.button("▶️ Iniciar Fila", disabled=st.session_state.is_queue_running):
+        st.session_state.is_queue_running = True
+        st.rerun()
+
+    if col2.button("⏹️ Parar Fila", disabled=not st.session_state.is_queue_running):
+        st.session_state.is_queue_running = False
+        st.rerun()
+
+    if col3.button("🗑️ Limpar Fila Completa"):
+        st.session_state.download_queue = []
+        st.session_state.is_queue_running = False
+        st.rerun()
+
+    if st.session_state.is_queue_running:
+        st.info("A fila está em execução. Novos downloads serão processados em sequência.")
+    else:
+        st.warning("A fila está parada.")
+
+    if st.session_state.is_queue_running and st.session_state.download_queue:
+        job = st.session_state.download_queue[0]
+        st.session_state.current_download_title = job['title']
+
+        st.markdown("---")
+        st.subheader(f"Baixando agora: {job['title']}")
+
+        gerenciador_de_download(job['ydl_opts'], job['url'], job['tipo'], job['download_dir'], display_mode='full')
+
+        if st.session_state.current_download_title is None:
+            st.session_state.download_queue.pop(0)
+            st.rerun()
+
+    if st.session_state.download_queue:
+        st.markdown("---")
+        st.subheader("Próximos na Fila")
+        for i, job in enumerate(st.session_state.download_queue):
+            c1, c2 = st.columns([4, 1])
+            if st.session_state.current_download_title and i == 0:
+                continue
+            c1.write(f"{i + 1}. {job['title']}")
+            if c2.button("Remover", key=f"remove_job_{i}"):
+                st.session_state.download_queue.pop(i)
+                st.rerun()
+    elif not st.session_state.current_download_title:
+        st.info("A fila de downloads está vazia.")
+
+def adicionar_musica_a_fila(video_url, video_title):
+    common_headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9'
+    }
+    ydl_opts = {
+        'ffmpeg_location': FFMPEG_LOCATION,
+        'format': 'bestaudio/best',
+        'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
+        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+        'http_headers': common_headers,
+    }
+    job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
+           "tipo": "Música", "download_dir": DOWNLOAD_DIRS["Música"]}
+    st.session_state.download_queue.append(job)
+    st.success(f"Adicionado à fila: {video_title}")
+
+def pagina_musicas():
+    st.title("🎵 Baixar músicas")
+
+    with st.expander("Ou baixar por link direto"):
         with st.form(key="music_link_form"):
             music_url = st.text_input("URL da música (Youtube, SoundCloud, etc.):", key="music_url_direct")
-            link_submitted = st.form_submit_button("Buscar Informações do Link")
+            link_submitted = st.form_submit_button("Baixar pelo link direto")
         if link_submitted:
             if music_url:
-                st.info(f"Buscando informações para a URL: {music_url}")
-                st.warning("A funcionalidade de download direto não está disponível.")
-            else:
-                st.warning("Por favor, insira a URL da música.")
+                try:
+                    st.info("Preparando para baixar a música...")
+                    download_dir = DOWNLOAD_DIRS["Música"]
+                    common_headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
+                    ydl_opts = {
+                        'ffmpeg_location': FFMPEG_LOCATION,
+                        'format': 'bestaudio/best',
+                        'outtmpl': f'{download_dir}/%(title)s.%(ext)s',
+                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                        'http_headers': common_headers,
+                    }
+                    gerenciador_de_download(ydl_opts, music_url, "Música", download_dir, display_mode='full')
+                except Exception as e:
+                    st.error(f"Não foi possível obter informações do link: {e}")
 
     with st.form(key="music_search_form"):
         search_query = st.text_input("Pesquisar música:", placeholder="Ex: Queen - Bohemian Rhapsody")
         search_submitted = st.form_submit_button("Pesquisar Música")
 
     if search_submitted:
+        st.session_state.music_search_results = []
         if search_query:
-            st.info(f"Pesquisando por músicas relacionadas a: '{search_query}'")
-            st.warning("A funcionalidade de download direto não está disponível.")
+            with st.spinner(f"Pesquisando por '{search_query}'..."):
+                try:
+                    common_headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
+                    ydl_opts = {
+                        'quiet': True,
+                        'default_search': 'ytsearch5',
+                        'extract_flat': 'in_playlist',
+                        'http_headers': common_headers
+                    }
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        results = ydl.extract_info(search_query, download=False)
+                        st.session_state.music_search_results = results.get('entries', [])
+                        if not st.session_state.music_search_results:
+                            st.warning("Nenhum resultado encontrado.")
+                except Exception as e:
+                    st.error(f"Erro na pesquisa: {e}")
+                    st.session_state.music_search_results = []
         else:
             st.warning("Por favor, digite algo para pesquisar.")
 
-def pagina_fila_de_downloads():
-    st.title("⏳ Fila de Downloads")
-    st.warning("Esta página é apenas informativa. A funcionalidade de download está desativada no Streamlit Cloud.")
-
-    # Botão de Exportar Fila (sem funcionalidade real de download)
-    if st.session_state.download_queue:
-        queue_json = json.dumps(st.session_state.download_queue, indent=4)
-        st.download_button(
-            label="📥 Exportar Fila (Simulado)",
-            data=queue_json,
-            file_name="fila_downloads_simulada.json",
-            mime="application/json",
-            disabled=True # Desabilitado pois não há downloads reais para exportar
-        )
+    if 'music_search_results' in st.session_state and st.session_state.music_search_results:
         st.markdown("---")
-
-    col1, col2, col3 = st.columns(3)
-    col1.button("▶️ Iniciar Fila", disabled=True) # Desabilitado
-    col2.button("⏹️ Parar Fila", disabled=True) # Desabilitado
-    col3.button("🗑️ Limpar Fila Completa", disabled=True) # Desabilitado
-
-    st.info("A fila de downloads está vazia ou desativada.")
-
-    if st.session_state.download_queue:
-        st.markdown("---")
-        st.subheader("Próximos na Fila (Simulado)")
-        for i, job in enumerate(st.session_state.download_queue):
-            c1, c2 = st.columns([4, 1])
-            c1.write(f"{i + 1}. {job['title']} (Tipo: {job['tipo']})")
-            c2.button("Remover", key=f"remove_job_{i}", disabled=True) # Desabilitado
-    elif not st.session_state.current_download_title:
-        st.info("A fila de downloads está vazia.")
-
+        st.subheader("Resultados da Pesquisa")
+        for i, entry in enumerate(st.session_state.music_search_results):
+            col1, col2, col3 = st.columns([1, 4, 1])
+            with col1:
+                thumbnail_url = entry.get('thumbnail')
+                if thumbnail_url:
+                    st.image(thumbnail_url, width=120)
+            with col2:
+                st.markdown(f"**{entry.get('title')}**")
+                duration = entry.get('duration_string', 'N/A')
+                st.caption(f"Duração: {duration}")
+            with col3:
+                if st.button("Baixar Música", key=f"add_music_{i}"):
+                    st.session_state.current_download_title = entry.get('title')
+                    common_headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
+                    ydl_opts = {
+                        'ffmpeg_location': FFMPEG_LOCATION,
+                        'format': 'bestaudio/best',
+                        'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
+                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
+                        'http_headers': common_headers,
+                    }
+                    gerenciador_de_download(ydl_opts, entry.get('url'), "Música", DOWNLOAD_DIRS["Música"], display_mode='full')
 
 def pagina_historico():
     st.title("📜 Histórico de downloads")
-    st.info("O histórico de downloads é mantido apenas para referência.")
-    # Botão de Exportar Histórico
     if os.path.exists("historico.txt"):
-        try:
-            with open("historico.txt", "r", encoding="utf-8") as f:
-                st.download_button(
-                    label="📥 Exportar Histórico",
-                    data=f.read(),
-                    file_name="historico_exportado.txt",
-                    mime="text/plain",
-                )
-        except IOError as e:
-            st.error(f"Erro ao ler o histórico para exportar: {e}")
-
+        with open("historico.txt", "r", encoding="utf-8") as f:
+            st.download_button(
+                label="📥 Exportar Histórico",
+                data=f.read(),
+                file_name="historico_exportado.txt",
+                mime="text/plain",
+            )
     if os.path.exists("historico.txt"):
-        try:
-            with open("historico.txt", "r", encoding="utf-8") as f:
-                linhas = f.readlines()
-            for linha in reversed(linhas): # Exibe do mais recente para o mais antigo
-                st.markdown(linha.strip()) # .strip() remove novas linhas extras
-        except IOError as e:
-            st.error(f"Erro ao ler o histórico: {e}")
-        
+        with open("historico.txt", "r", encoding="utf-8") as f:
+            linhas = f.readlines()
+        for linha in linhas[::-1]:
+            st.markdown(linha)
         if st.button("Limpar Histórico"):
-            try:
-                open("historico.txt", "w").close()
-                st.success("Histórico limpo com sucesso!")
-                st.rerun()
-            except IOError as e:
-                st.error(f"Erro ao limpar o histórico: {e}")
+            open("historico.txt", "w").close()
+            st.rerun()
     else:
-        st.info("Nenhum download registrado ainda.")
+        st.info("Nenhum download realizado ainda.")
 
 def pagina_playlist():
     st.title("🎶 Minhas músicas & Playlists")
-    st.info("As funcionalidades de áudio e playlist não estão ativas pois os downloads foram removidos.")
     download_dir = DOWNLOAD_DIRS["Música"]
-    if os.path.exists(download_dir) and os.listdir(download_dir):
+    if os.path.exists(download_dir):
         arquivos = sorted([f for f in os.listdir(download_dir) if f.endswith(".mp3")])
-
         if not arquivos:
             st.info("Nenhuma música baixada ainda.")
             return
-
-        # Botão de Exportar Lista de Músicas
         lista_musicas_str = "\n".join(arquivos)
         st.download_button(
-            label="📥 Exportar Lista de Músicas (Simulado)",
+            label="📥 Exportar Lista de Músicas",
             data=lista_musicas_str,
-            file_name="lista_de_musicas_simulada.txt",
+            file_name="lista_de_musicas.txt",
             mime="text/plain",
-            disabled=True # Desabilitado pois não há downloads reais
         )
         st.markdown("---")
-
-        # A funcionalidade de multiselect e st.audio foi desativada.
-        st.info("A reprodução de áudio e criação de playlists não está disponível nesta versão.")
-
-        st.subheader("Músicas Baixadas (Apenas lista)")
+        playlist = st.multiselect("Selecione músicas para criar uma playlist temporária", arquivos)
+        if playlist:
+            st.audio([os.path.join(download_dir, m) for m in playlist], format="audio/mp3")
+            st.markdown("---")
         for i, musica in enumerate(arquivos):
             col1, col2 = st.columns([4, 1])
             with col1:
                 st.markdown(f"**{musica}**")
             with col2:
-                if st.button("Deletar (Simulado)", key=f"delete_music_{i}", type="primary", disabled=True):
-                    st.warning("Funcionalidade de deleção desativada.")
+                if st.button("Deletar", key=f"delete_music_{i}", type="primary"):
+                    try:
+                        os.remove(os.path.join(download_dir, musica))
+                        st.success(f"Música '{musica}' deletada com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao deletar a música: {e}")
+            st.audio(os.path.join(download_dir, musica), format="audio/mp3")
             st.markdown("---")
     else:
         st.info("Nenhuma música baixada.")
 
 def pagina_configuracoes():
     st.title("⚙️ Configurações")
-
     current_config = st.session_state.config
-
     st.subheader("Aparência")
     tema = st.selectbox("Tema do app", ["Padrão", "Vermelho"], index=["Padrão", "Vermelho"].index(current_config.get("tema", "Padrão")))
     layout = st.selectbox("Layout", ["Moderno", "Compacto", "Clássico"], index=["Moderno", "Compacto", "Clássico"].index(current_config.get("layout", "Moderno")))
-
     st.subheader("Player")
     volume = st.slider("Volume padrão do player", 0, 100, current_config.get("volume", 70))
     st.caption("Nota: O controle de volume ainda não é suportado pelos players padrão do Streamlit.")
-
     st.subheader("Downloads e Pesquisa")
-    # Opção de cookies removida, pois não funciona em produção no Streamlit Cloud
     browser_cookies = st.selectbox(
-        "Usar cookies do navegador para pesquisa",
-        ["Nenhum (Não suportado em nuvem)"],
-        index=0,
-        disabled=True # Desabilitado
+        "Usar cookies do navegador para pesquisa (resolve erros 'Sign in to confirm you’re not a bot')",
+        ["Nenhum"]
     )
-
     st.markdown("---")
-    # Botão para exportar as configurações atuais
     config_json = json.dumps(st.session_state.config, indent=4)
     st.download_button(
         label="📥 Exportar Configurações",
@@ -429,58 +659,52 @@ def pagina_configuracoes():
         file_name="config_exportada.json",
         mime="application/json",
     )
-
     if st.button("Salvar Preferências"):
         new_config = {
             "tema": tema,
             "layout": layout,
             "volume": volume,
-            "browser_cookies": browser_cookies # Mantido, mas desabilitado
+            "browser_cookies": browser_cookies
         }
-        save_config(new_config) # Salva no arquivo config.json
-        st.session_state.config = new_config # Atualiza o estado da sessão
-        st.success("Preferências salvas com sucesso! Algumas mudanças de tema podem requerer recarregar a página.")
+        save_config(new_config)
+        st.session_state.config = new_config
+        st.success("Preferências salvas com sucesso! As mudanças de tema serão aplicadas ao recarregar a página.")
         st.balloons()
 
 def pagina_filmes_baixados():
     st.title("🎬 Filmes Baixados")
-    st.info("A funcionalidade de exibição de filmes baixados não está ativa pois os downloads foram removidos.")
     download_dir = DOWNLOAD_DIRS["Filme"]
-    
-    # Simula a exibição de uma lista, mas sem arquivos reais
-    st.info("Nenhum filme baixado nesta versão.")
-    
-    # Se existisse o diretório e arquivos, o código seria:
-    # if os.path.exists(download_dir):
-    #     video_extensions = ['.mp4', '.mkv', '.webm', '.flv', '.avi']
-    #     arquivos = [f for f in os.listdir(download_dir) if os.path.splitext(f)[1].lower() in video_extensions]
-    #
-    #     if not arquivos:
-    #         st.info("Nenhum filme baixado ainda.")
-    #         return
-    #
-    #     lista_filmes_str = "\n".join(arquivos)
-    #     st.download_button(
-    #         label="📥 Exportar Lista de Filmes (Simulado)",
-    #         data=lista_filmes_str,
-    #         file_name="lista_de_filmes_simulada.txt",
-    #         mime="text/plain",
-    #         disabled=True
-    #     )
-    #     st.markdown("---")
-    #
-    #     for i, filme in enumerate(sorted(arquivos)):
-    #         col1, col2 = st.columns([4, 1])
-    #         with col1:
-    #             st.markdown(f"**{filme}**")
-    #         with col2:
-    #             if st.button("Deletar (Simulado)", key=f"delete_movie_{i}", type="primary", disabled=True):
-    #                 st.warning("Funcionalidade de deleção desativada.")
-    #         st.video(os.path.join(download_dir, filme)) # Desativado pois o arquivo não existe
-    #         st.markdown("---")
-    # else:
-    #     st.info("Nenhum filme baixado ainda.")
-
+    if os.path.exists(download_dir):
+        video_extensions = ['.mp4', '.mkv', '.webm', '.flv', '.avi']
+        arquivos = [f for f in os.listdir(download_dir) if os.path.splitext(f)[1].lower() in video_extensions]
+        if not arquivos:
+            st.info("Nenhum filme baixado ainda.")
+            return
+        lista_filmes_str = "\n".join(arquivos)
+        st.download_button(
+            label="📥 Exportar Lista de Filmes",
+            data=lista_filmes_str,
+            file_name="lista_de_filmes.txt",
+            mime="text/plain",
+        )
+        st.markdown("---")
+        for i, filme in enumerate(sorted(arquivos)):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.markdown(f"**{filme}**")
+            with col2:
+                if st.button("Deletar", key=f"delete_movie_{i}", type="primary"):
+                    try:
+                        filepath = os.path.join(download_dir, filme)
+                        os.remove(filepath)
+                        st.success(f"Filme '{filme}' deletado com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao deletar o filme: {e}")
+            st.video(os.path.join(download_dir, filme))
+            st.markdown("---")
+    else:
+        st.info("Nenhum filme baixado ainda.")
 
 # --- Roteamento das Páginas ---
 if pagina == "Baixar Vídeos":
@@ -501,16 +725,10 @@ elif pagina == "Configurações":
     pagina_configuracoes()
 
 # --- Lógica de Processamento da Fila em "Segundo Plano" ---
-# Esta lógica é mantida apenas para demonstrar a estrutura,
-# mas não terá funcionalidade real de download no Streamlit Cloud.
 if st.session_state.is_queue_running and st.session_state.download_queue and pagina != "Fila de Downloads":
-    st.toast("Processamento em segundo plano da fila desativado no Streamlit Cloud.")
-    # O código abaixo seria executado se houvesse downloads reais:
-    # job = st.session_state.download_queue[0]
-    # st.session_state.current_download_title = job['title']
-    # st.toast(f"Iniciando download: {job['title']}")
-    # Aqui seria chamada uma função que simula o download ou mostra um progresso.
-    # Como não há download real, esta parte é apenas um placeholder.
-    # Se o download terminasse (simuladamente):
-    # st.session_state.download_queue.pop(0)
-    # st.rerun()
+    job = st.session_state.download_queue[0]
+    st.session_state.current_download_title = job['title']
+    st.toast(f"Iniciando download: {job['title']}")
+    gerenciador_de_download(job['ydl_opts'], job['url'], job['tipo'], job['download_dir'], display_mode='toast')
+    if st.session_state.current_download_title is None:
+        st.session_state.download_queue.pop(0)
