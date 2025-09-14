@@ -3,5 +3,5 @@ pandas
 plotly
 instaloader
 openpyxl
-yt-dlp
-# outras dependências...
+yt-dlp==2024.01.01 # Ou a versão mais recente disponível
+requests
