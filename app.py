@@ -321,7 +321,10 @@ def pagina_baixar_videos():
                 "url": yt_url, "title": yt_url,
                 "ydl_opts": {
                     'outtmpl': 'youtube_baixados/%(title)s.%(ext)s',
-                    'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
                 },
                 "tipo": "Youtube", "download_dir": "youtube_baixados"
             }
@@ -363,7 +366,10 @@ def pagina_baixar_videos():
                 "url": tw_url, "title": tw_url,
                 "ydl_opts": {
                     'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s',
-                    'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    }
                 },
                 "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]
             }
@@ -378,7 +384,10 @@ def adicionar_filme_a_fila(video_url, video_title):
         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
         'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
         'ffmpeg_location': FFMPEG_LOCATION,
-        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9'
+        },
     }
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Filme", "download_dir": DOWNLOAD_DIRS["Filme"]}
@@ -403,7 +412,10 @@ def pagina_filmes():
                         'quiet': True,
                         'default_search': 'ytsearch5',
                         'extract_flat': 'in_playlist',
-                        'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        }
                     }
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -437,7 +449,10 @@ def pagina_filmes():
                         'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
                         'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
                         'ffmpeg_location': FFMPEG_LOCATION,
-                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        },
                     }
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Filme", DOWNLOAD_DIRS["Filme"], display_mode='full')
                     
@@ -516,7 +531,10 @@ def adicionar_musica_a_fila(video_url, video_title):
             'preferredcodec': 'mp3',
             'preferredquality': '192',
         }],
-        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9'
+        },
     }
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Música", "download_dir": DOWNLOAD_DIRS["Música"]}
@@ -545,7 +563,10 @@ def pagina_musicas():
                             'preferredcodec': 'mp3',
                             'preferredquality': '192',
                         }],
-        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        },
                     }
                     # Chama o gerenciador de download diretamente
                     gerenciador_de_download(ydl_opts, music_url, "Música", download_dir, display_mode='full')
@@ -566,7 +587,10 @@ def pagina_musicas():
                         'quiet': True,
                         'default_search': 'ytsearch5',
                         'extract_flat': 'in_playlist',
-                        'http_headers': {'User-Agent': 'Mozilla/5.0'}
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        }
                     }
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -601,7 +625,10 @@ def pagina_musicas():
                         'format': 'bestaudio/best',
                         'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
                         'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                        'http_headers': {'User-Agent': 'Mozilla/5.0'},
+                        'http_headers': {
+                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+                            'Accept-Language': 'en-US,en;q=0.9'
+                        },
                     }
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Música", DOWNLOAD_DIRS["Música"], display_mode='full')
 
