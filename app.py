@@ -654,7 +654,6 @@ def pagina_musicas():
                     # Adiciona cookies se estiverem configurados
                     if st.session_state.config.get("youtube_cookies"):
                         ydl_opts['cookiefile'] = "cookies.txt"
-                    }
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Música", DOWNLOAD_DIRS["Música"], display_mode='full')
 
 def pagina_historico():
