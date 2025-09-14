@@ -138,6 +138,24 @@ PAGES = {
 # Cria os diretórios na inicialização
 criar_diretorios()
 
+# --- Funções Auxiliares de Download ---
+
+def get_yt_dlp_options(output_template, postprocessors=None):
+    """Cria um dicionário de opções base para o yt-dlp, incluindo headers e cookies."""
+    options = {
+        'outtmpl': output_template,
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
+            'Accept-Language': 'en-US,en;q=0.9'
+        },
+        'nocheckcertificate': True, # Adicionado para contornar possíveis problemas de SSL
+        'ffmpeg_location': FFMPEG_LOCATION,
+    }
+    if postprocessors:
+        options['postprocessors'] = postprocessors
+    if st.session_state.config.get("youtube_cookies"):
+        options['cookiefile'] = "cookies.txt"
+    return options
 # --- Lógica da Página Atual ---
 if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = "Baixar Vídeos" # Página padrão
@@ -318,21 +336,10 @@ def pagina_baixar_videos():
             yt_url = st.text_input("URL do vídeo do Youtube:")
             submitted = st.form_submit_button("Adicionar à Fila")
         if submitted and yt_url:
-            job = {
-                "url": yt_url, "title": yt_url,
-                "ydl_opts": {
-                    'outtmpl': f'{DOWNLOAD_DIRS["Youtube"]}/%(title)s.%(ext)s',
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
-                },
-                "tipo": "Youtube", "download_dir": DOWNLOAD_DIRS["Youtube"]
-            }
-            # Adiciona cookies se estiverem configurados
-            if st.session_state.config.get("youtube_cookies"):
-                job["ydl_opts"]['cookiefile'] = "cookies.txt"
-
+            output_template = f'{DOWNLOAD_DIRS["Youtube"]}/%(title)s.%(ext)s'
+            ydl_opts = get_yt_dlp_options(output_template)
+            job = {"url": yt_url, "title": yt_url, "ydl_opts": ydl_opts,
+                   "tipo": "Youtube", "download_dir": DOWNLOAD_DIRS["Youtube"]}
             st.session_state.download_queue.append(job)
             st.success(f"Vídeo do YouTube adicionado à fila.")
         elif submitted:
@@ -370,17 +377,10 @@ def pagina_baixar_videos():
             tw_url = st.text_input("URL do vídeo do Twitter:")
             submitted = st.form_submit_button("Adicionar à Fila")
         if submitted and tw_url:
-            job = {
-                "url": tw_url, "title": tw_url,
-                "ydl_opts": {
-                    'outtmpl': f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s',
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                        'Accept-Language': 'en-US,en;q=0.9'
-                    }
-                },
-                "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]
-            }
+            output_template = f'{DOWNLOAD_DIRS["Twitter"]}/%(title)s.%(ext)s'
+            ydl_opts = get_yt_dlp_options(output_template)
+            job = {"url": tw_url, "title": tw_url, "ydl_opts": ydl_opts,
+                   "tipo": "Twitter", "download_dir": DOWNLOAD_DIRS["Twitter"]}
             st.session_state.download_queue.append(job)
             st.success(f"Vídeo do Twitter adicionado à fila.")
         elif submitted:
@@ -388,15 +388,9 @@ def pagina_baixar_videos():
 
 def adicionar_filme_a_fila(video_url, video_title):
     """Adiciona um filme à fila de downloads."""
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
-        'ffmpeg_location': FFMPEG_LOCATION,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-            'Accept-Language': 'en-US,en;q=0.9'
-        },
-    }
+    output_template = f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s'
+    ydl_opts = get_yt_dlp_options(output_template)
+    ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Filme", "download_dir": DOWNLOAD_DIRS["Filme"]}
     st.session_state.download_queue.append(job)
@@ -416,19 +410,10 @@ def pagina_filmes():
             with st.spinner(f"Pesquisando por '{full_search_query}'..."):
                 try:
                     # Limita a busca aos 5 primeiros resultados com 'ytsearch5:'
-                    ydl_opts = {
-                        'quiet': True,
-                        'default_search': 'ytsearch5',
-                        'extract_flat': 'in_playlist',
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                            'Accept-Language': 'en-US,en;q=0.9'
-                        }
-                    }
-                    # Adiciona cookies se estiverem configurados
-                    if st.session_state.config.get("youtube_cookies"):
-                        ydl_opts['cookiefile'] = "cookies.txt"
-
+                    ydl_opts = get_yt_dlp_options(None) # Template não necessário para busca
+                    ydl_opts['quiet'] = True
+                    ydl_opts['default_search'] = 'ytsearch5'
+                    ydl_opts['extract_flat'] = 'in_playlist'
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(full_search_query, download=False)
@@ -457,18 +442,9 @@ def pagina_filmes():
             with col3:
                 if st.button("Baixar Filme", key=f"add_film_{i}"):
                     st.session_state.current_download_title = entry.get('title')
-                    ydl_opts = {
-                        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-                        'outtmpl': f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s',
-                        'ffmpeg_location': FFMPEG_LOCATION,
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                            'Accept-Language': 'en-US,en;q=0.9'
-                        },
-                    }
-                    # Adiciona cookies se estiverem configurados
-                    if st.session_state.config.get("youtube_cookies"):
-                        ydl_opts['cookiefile'] = "cookies.txt"
+                    output_template = f'{DOWNLOAD_DIRS["Filme"]}/%(title)s.%(ext)s'
+                    ydl_opts = get_yt_dlp_options(output_template)
+                    ydl_opts['format'] = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Filme", DOWNLOAD_DIRS["Filme"], display_mode='full')
                     
 def pagina_fila_de_downloads():
@@ -537,20 +513,11 @@ def pagina_fila_de_downloads():
 
 def adicionar_musica_a_fila(video_url, video_title):
     """Adiciona uma música à fila de downloads para conversão em MP3."""
-    ydl_opts = {
-        'ffmpeg_location': FFMPEG_LOCATION,
-        'format': 'bestaudio/best',
-        'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-            'Accept-Language': 'en-US,en;q=0.9'
-        },
-    }
+    output_template = f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s'
+    postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+    ydl_opts = get_yt_dlp_options(output_template, postprocessors=postprocessors)
+    ydl_opts['format'] = 'bestaudio/best'
+
     job = {"url": video_url, "title": video_title, "ydl_opts": ydl_opts,
            "tipo": "Música", "download_dir": DOWNLOAD_DIRS["Música"]}
     st.session_state.download_queue.append(job)
@@ -569,23 +536,10 @@ def pagina_musicas():
                     # Inicia o download direto sem adicionar à fila
                     st.info("Preparando para baixar a música...")
                     download_dir = DOWNLOAD_DIRS["Música"]
-                    ydl_opts = {
-                        'ffmpeg_location': FFMPEG_LOCATION,
-                        'format': 'bestaudio/best',
-                        'outtmpl': f'{download_dir}/%(title)s.%(ext)s',
-                        'postprocessors': [{
-                            'key': 'FFmpegExtractAudio',
-                            'preferredcodec': 'mp3',
-                            'preferredquality': '192',
-                        }],
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                            'Accept-Language': 'en-US,en;q=0.9'
-                        },
-                    }
-                    # Adiciona cookies se estiverem configurados
-                    if st.session_state.config.get("youtube_cookies"):
-                        ydl_opts['cookiefile'] = "cookies.txt"
+                    output_template = f'{download_dir}/%(title)s.%(ext)s'
+                    postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+                    ydl_opts = get_yt_dlp_options(output_template, postprocessors=postprocessors)
+                    ydl_opts['format'] = 'bestaudio/best'
                     # Chama o gerenciador de download diretamente
                     gerenciador_de_download(ydl_opts, music_url, "Música", download_dir, display_mode='full')
 
@@ -601,18 +555,10 @@ def pagina_musicas():
         if search_query:
             with st.spinner(f"Pesquisando por '{search_query}'..."):
                 try:
-                    ydl_opts = {
-                        'quiet': True,
-                        'default_search': 'ytsearch5',
-                        'extract_flat': 'in_playlist',
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                            'Accept-Language': 'en-US,en;q=0.9'
-                        }
-                    }
-                    # Adiciona cookies se estiverem configurados
-                    if st.session_state.config.get("youtube_cookies"):
-                        ydl_opts['cookiefile'] = "cookies.txt"
+                    ydl_opts = get_yt_dlp_options(None) # Template não necessário para busca
+                    ydl_opts['quiet'] = True
+                    ydl_opts['default_search'] = 'ytsearch5'
+                    ydl_opts['extract_flat'] = 'in_playlist'
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         results = ydl.extract_info(search_query, download=False)
@@ -641,19 +587,10 @@ def pagina_musicas():
             with col3:
                 if st.button("Baixar Música", key=f"add_music_{i}"):
                     st.session_state.current_download_title = entry.get('title')
-                    ydl_opts = {
-                        'ffmpeg_location': FFMPEG_LOCATION,
-                        'format': 'bestaudio/best',
-                        'outtmpl': f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s',
-                        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-                        'http_headers': {
-                            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1',
-                            'Accept-Language': 'en-US,en;q=0.9'
-                        },
-                    }
-                    # Adiciona cookies se estiverem configurados
-                    if st.session_state.config.get("youtube_cookies"):
-                        ydl_opts['cookiefile'] = "cookies.txt"
+                    output_template = f'{DOWNLOAD_DIRS["Música"]}/%(title)s.%(ext)s'
+                    postprocessors = [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]
+                    ydl_opts = get_yt_dlp_options(output_template, postprocessors=postprocessors)
+                    ydl_opts['format'] = 'bestaudio/best'
                     gerenciador_de_download(ydl_opts, entry.get('url'), "Música", DOWNLOAD_DIRS["Música"], display_mode='full')
 
 def pagina_historico():
