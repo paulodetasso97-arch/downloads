@@ -158,6 +158,13 @@ def get_yt_dlp_options(output_template, postprocessors=None):
         options['cookiefile'] = "cookies.txt"
     return options
 
+def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
+    """Gerencia o processo de download com yt-dlp de forma simplificada."""
+    st.session_state.progress_placeholder = st.empty()
+    st.session_state.download_button_placeholder = st.empty()
+    st.session_state.display_mode = display_mode
+    st.session_state['final_filepath'] = None
+
     def progress_hook(d):
         if st.session_state.get('cancel_download', False):
             raise yt_dlp.utils.DownloadCancelled()
@@ -181,19 +188,8 @@ def get_yt_dlp_options(output_template, postprocessors=None):
                         st.toast(progress_text)
 
         elif d['status'] == 'finished':
-            if ydl_opts.get('postprocessors'):
-                if st.session_state.get('progress_placeholder'):
-                    st.session_state.progress_placeholder.progress(1.0, text="Download concluído. Convertendo...")
-            else:
-                if st.session_state.get('progress_placeholder'):
-                    st.session_state.progress_placeholder.progress(1.0, text="Download concluído!")
-
-def gerenciador_de_download(ydl_opts, url_ou_lista_urls, tipo, download_dir, display_mode='full'):
-    """Gerencia o processo de download com yt-dlp de forma simplificada."""
-    st.session_state.progress_placeholder = st.empty()
-    st.session_state.download_button_placeholder = st.empty()
-    st.session_state.display_mode = display_mode
-    st.session_state['final_filepath'] = None
+            if st.session_state.get('progress_placeholder'):
+                st.session_state.progress_placeholder.progress(1.0, text="Download concluído!")
 
     ydl_opts['progress_hooks'] = [progress_hook]
 
